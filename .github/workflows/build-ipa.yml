@@ -4,6 +4,9 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: write        # para publicar o IPA em Releases
+
 jobs:
   ipa:
     runs-on: macos-26
@@ -47,6 +50,25 @@ jobs:
           cp -R "$APP" Payload/
           zip -qry Estudio.ipa Payload
           ls -la Estudio.ipa
+
+      - name: Publicar o IPA em Releases (link direto)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Estúdio — build ${{ github.run_number }}
+          body: |
+            Commit ${{ github.sha }}
+            Link fixo para a versão mais nova:
+            https://github.com/${{ github.repository }}/releases/latest/download/Estudio.ipa
+          files: Estudio.ipa
+          make_latest: true
+
+      - name: Link do IPA
+        run: |
+          echo "### Estudio.ipa" >> $GITHUB_STEP_SUMMARY
+          echo "Desta build: https://github.com/${{ github.repository }}/releases/download/build-${{ github.run_number }}/Estudio.ipa" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Sempre a mais nova: https://github.com/${{ github.repository }}/releases/latest/download/Estudio.ipa" >> $GITHUB_STEP_SUMMARY
 
       - uses: actions/upload-artifact@v4
         with:
