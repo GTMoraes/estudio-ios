@@ -22,6 +22,22 @@ jobs:
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
 
+      - name: Cache dos codificadores de áudio (MP3/OGG)
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: codificadores-${{ hashFiles('scripts/compilar-codificadores.sh') }}
+
+      - name: Compilar LAME e Vorbis para iPhone
+        run: |
+          bash scripts/compilar-codificadores.sh
+          # sem isto o Xcode só reclama lá na frente ("lame/lame.h file not found")
+          for f in vendor/include/lame/lame.h vendor/include/vorbis/vorbisenc.h vendor/include/ogg/ogg.h \
+                   vendor/lib/libmp3lame.a vendor/lib/libvorbisenc.a vendor/lib/libvorbis.a vendor/lib/libogg.a; do
+            [ -f "$f" ] || { echo "::error::faltou $f"; exit 1; }
+          done
+          echo "codificadores OK"
+
       - name: Gerar o projeto (XcodeGen)
         run: |
           brew install xcodegen
