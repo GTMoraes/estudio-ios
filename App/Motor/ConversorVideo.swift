@@ -60,6 +60,11 @@ struct InfoMidia: Equatable {
                 let dv = atomos.map { $0.keys.contains("dvcC") || $0.keys.contains("dvvC") || $0.keys.contains("dvwC") } ?? false
                 i.dolbyVision = dv || sub == 0x64766831 /* dvh1 */ || sub == 0x64766865 /* dvhe */
             }
+            // reserva: alguns arquivos não trazem a curva na descrição do formato
+            if i.hdr == .sdr {
+                let caract = (try? await v.load(.mediaCharacteristics)) ?? []
+                if caract.contains(.containsHDRVideo) || i.dolbyVision { i.hdr = .hlg }
+            }
         }
         let audios = try await asset.loadTracks(withMediaType: .audio)
         if let a = audios.first {
@@ -103,12 +108,21 @@ struct OpcoesConversao: Codable, Equatable {
 
     var acao: Acao = .video
     var codec: Codec = .hevc
-    var ladoMaior = 1080            // 0 = original
+    enum ModoTaxa: String, Codable, CaseIterable { case qualidade, mbps, alvo }
+
+    /// "1080" = 1080p: 1080 no LADO MENOR (1920×1080 deitado, 1080×1920 em pé), como no ConversorMidia.
+    /// 0 = original; -1 = caixa personalizada (cabe em caixaLargura × caixaAltura).
+    var ladoMenor = 1080
+    var caixaLargura = 1920
+    var caixaAltura = 1080
     var fps = 0                      // 0 = original (vira taxa constante)
     var saida: Saida = .manterHDR
     var manterDolbyVision = true
-    var qualidade = 0.55             // 0...1 → taxa de bits por pixel
-    var alvoMB: Double?              // se houver, a taxa sai do tamanho pedido
+    var modoTaxa: ModoTaxa = .qualidade
+    var qualidade = 0.55             // 0...1 → bits por pixel (mesma qualidade em qualquer resolução)
+    var mbps = 8.0                   // modo .mbps
+    var alvoMB = 50.0                // modo .alvo
+    var velocidade = 1.0             // 0,5× … 4×; o áudio mantém o tom
     var copiarAudio = true           // AAC da origem entra sem recodificar
     var audioKbps = 192              // AAC quando precisa recodificar (vídeo e M4A)
     var formatoAudio: FormatoAudio = .m4a
@@ -142,9 +156,9 @@ enum PresetConversao: String, CaseIterable, Identifiable {
 
     var dica: String {
         switch self {
-        case .instagramHDR: return "Mantém o HDR (HLG/BT.2020, 10 bits); 1080 no lado maior. O Dolby Vision vira HDR comum (para manter, use \"sem recodificar\")."
+        case .instagramHDR: return "Mantém o HDR (HLG/BT.2020, 10 bits); 1080p (1920×1080 deitado, 1080×1920 em pé). O Dolby Vision vira HDR comum (para manter, use \"sem recodificar\")."
         case .instagramCopia: return "Copia o vídeo sem recodificar: perda zero, mantém até o Dolby Vision. Mesmo tamanho do original."
-        case .instagramSDR: return "H.264 1080; vídeo HDR é convertido para SDR pelo próprio iOS."
+        case .instagramSDR: return "H.264 1080p; vídeo HDR é convertido para SDR pelo próprio iOS."
         case .qualidade: return "Mantém resolução e fps, HEVC com taxa alta; áudio copiado quando dá."
         case .menor: return "HEVC com taxa baixa e no máximo 30 fps."
         case .davinci: return "H.264 SDR 8 bits com taxa de quadros constante (resolve o fps variável do iPhone); taxa alta."
@@ -157,20 +171,22 @@ enum PresetConversao: String, CaseIterable, Identifiable {
 
     func aplicar(_ o: inout OpcoesConversao) {
         let trecho = (o.inicio, o.fim)
+        let velocidade = o.velocidade          // trecho e velocidade são do arquivo, não do preset
         var n = OpcoesConversao()
         switch self {
-        case .instagramHDR: n.codec = .hevc; n.ladoMaior = 1080; n.saida = .manterHDR; n.qualidade = 0.55
+        case .instagramHDR: n.codec = .hevc; n.ladoMenor = 1080; n.saida = .manterHDR; n.qualidade = 0.55
         case .instagramCopia: n.acao = .semRecodificar
-        case .instagramSDR: n.codec = .h264; n.ladoMaior = 1080; n.saida = .sdr; n.qualidade = 0.55
-        case .qualidade: n.codec = .hevc; n.ladoMaior = 0; n.qualidade = 0.75
-        case .menor: n.codec = .hevc; n.ladoMaior = 0; n.fps = 30; n.qualidade = 0.25
-        case .davinci: n.codec = .h264; n.ladoMaior = 0; n.saida = .sdr; n.qualidade = 1.0; n.copiarAudio = false; n.audioKbps = 320
-        case .alvo: n.codec = .hevc; n.ladoMaior = 1080; n.alvoMB = 50; n.copiarAudio = false; n.audioKbps = 128
+        case .instagramSDR: n.codec = .h264; n.ladoMenor = 1080; n.saida = .sdr; n.qualidade = 0.55
+        case .qualidade: n.codec = .hevc; n.ladoMenor = 0; n.qualidade = 0.75
+        case .menor: n.codec = .hevc; n.ladoMenor = 0; n.fps = 30; n.qualidade = 0.25
+        case .davinci: n.codec = .h264; n.ladoMenor = 0; n.saida = .sdr; n.qualidade = 1.0; n.copiarAudio = false; n.audioKbps = 320
+        case .alvo: n.codec = .hevc; n.ladoMenor = 1080; n.modoTaxa = .alvo; n.alvoMB = 50; n.copiarAudio = false; n.audioKbps = 128
         case .cortar: n.acao = .semRecodificar
         case .audio: n.acao = .audio
         case .personalizado: n = o
         }
         (n.inicio, n.fim) = trecho
+        if n.acao != .semRecodificar { n.velocidade = velocidade }
         o = n
     }
 }
@@ -179,9 +195,14 @@ enum PresetConversao: String, CaseIterable, Identifiable {
 
 enum PlanoConversao {
     /// Dimensões de saída: nunca aumenta, mantém proporção, números pares.
-    static func dimensoes(_ info: InfoMidia, ladoMaior: Int) -> (Int, Int) {
+    static func dimensoes(_ info: InfoMidia, _ o: OpcoesConversao) -> (Int, Int) {
         let w = Double(max(info.largura, 2)), h = Double(max(info.altura, 2))
-        let escala = ladoMaior > 0 ? min(1, Double(ladoMaior) / max(w, h)) : 1
+        var escala = 1.0
+        if o.ladoMenor > 0 {
+            escala = min(1, Double(o.ladoMenor) / min(w, h))
+        } else if o.ladoMenor < 0, o.caixaLargura > 0, o.caixaAltura > 0 {
+            escala = min(1, Double(o.caixaLargura) / w, Double(o.caixaAltura) / h)
+        }
         func par(_ x: Double) -> Int { max(2, Int((x * escala / 2).rounded()) * 2) }
         return (par(w), par(h))
     }
@@ -195,28 +216,43 @@ enum PlanoConversao {
         info.hdr != .sdr && o.codec == .hevc && o.saida == .manterHDR
     }
 
+    /// Duração do resultado (trecho ÷ velocidade; sem recodificar a velocidade não se aplica).
     static func duracao(_ info: InfoMidia, _ o: OpcoesConversao) -> Double {
         let ini = max(0, o.inicio ?? 0), fim = min(info.duracao, o.fim ?? info.duracao)
-        return max(0.1, fim - ini)
+        let v = o.acao == .semRecodificar ? 1 : max(0.1, o.velocidade)
+        return max(0.1, (fim - ini) / v)
+    }
+
+    static func mudaVelocidade(_ o: OpcoesConversao) -> Bool {
+        o.acao != .semRecodificar && abs(o.velocidade - 1) > 0.001
     }
 
     static func audioBps(_ info: InfoMidia, _ o: OpcoesConversao) -> Double {
         guard info.temAudio else { return 0 }
-        return (o.copiarAudio && info.audioAAC) ? 256_000 : Double(o.audioKbps) * 1000
+        return (o.copiarAudio && info.audioAAC && !mudaVelocidade(o)) ? 256_000 : Double(o.audioKbps) * 1000
+    }
+
+    /// Taxa por qualidade: bits por pixel × pixels × fps (a posição do controle vale
+    /// a mesma qualidade de imagem em qualquer resolução).
+    static func taxaPorQualidade(_ info: InfoMidia, _ o: OpcoesConversao, _ q: Double) -> Double {
+        let (w, h) = dimensoes(info, o)
+        var bpp = 0.03 + q * 0.12                   // HEVC
+        if o.codec == .h264 { bpp *= 1.5 }
+        if hdrSaida(info, o) { bpp *= 1.25 }
+        return min(150_000_000, max(300_000, bpp * Double(w * h) * fpsSaida(info, o)))
     }
 
     /// Taxa de bits do vídeo (bps).
     static func taxaVideo(_ info: InfoMidia, _ o: OpcoesConversao) -> Double {
-        let (w, h) = dimensoes(info, ladoMaior: o.ladoMaior)
-        let fps = fpsSaida(info, o)
-        if let mb = o.alvoMB, mb > 0 {
-            let total = mb * 8_000_000 / duracao(info, o)
+        switch o.modoTaxa {
+        case .alvo:
+            let total = max(0.5, o.alvoMB) * 8_000_000 / duracao(info, o)
             return max(300_000, (total - audioBps(info, o)) * 0.96)
+        case .mbps:
+            return min(150_000_000, max(300_000, o.mbps * 1_000_000))
+        case .qualidade:
+            return taxaPorQualidade(info, o, o.qualidade)
         }
-        var bpp = 0.03 + o.qualidade * 0.12                   // HEVC
-        if o.codec == .h264 { bpp *= 1.5 }
-        if hdrSaida(info, o) { bpp *= 1.25 }
-        return min(150_000_000, max(300_000, bpp * Double(w * h) * fps))
     }
 
     static func tamanhoEstimado(_ info: InfoMidia, _ o: OpcoesConversao) -> Int64 {
@@ -314,10 +350,27 @@ enum ConversorVideo {
         let duracaoTotal = try await asset.load(.duration)
 
         let hdr = PlanoConversao.hdrSaida(info, o)
-        let (w, h) = PlanoConversao.dimensoes(info, ladoMaior: o.ladoMaior)
+        let (w, h) = PlanoConversao.dimensoes(info, o)
         let fps = PlanoConversao.fpsSaida(info, o)
         let taxa = PlanoConversao.taxaVideo(info, o)
         let faixa = intervalo(info, o)
+
+        // velocidade ≠ 1: lê de uma composição com o tempo escalado (o trecho já vai nela)
+        let veloz = PlanoConversao.mudaVelocidade(o)
+        var fonte: AVAsset = asset
+        var vUsar: AVAssetTrack = vtrack
+        var aUsar: AVAssetTrack? = atrack
+        var inicioSessao = faixa.start
+        var duracaoInstr = duracaoTotal
+        var duracaoSaida = faixa.duration
+        if veloz {
+            let (c, cv, ca) = try await Velocidade.composicao(asset, faixa: faixa, velocidade: o.velocidade, comVideo: true)
+            guard let cv else { throw ErroApp("Não consegui montar o vídeo com a nova velocidade.") }
+            fonte = c; vUsar = cv; aUsar = ca
+            inicioSessao = .zero
+            duracaoInstr = c.duration
+            duracaoSaida = c.duration
+        }
 
         // composição: orientação, escala, fps constante e espaço de cor de saída
         let exib = CGRect(origin: .zero, size: tam).applying(transf)
@@ -332,8 +385,8 @@ enum ConversorVideo {
         comp.renderSize = CGSize(width: w, height: h)
         comp.frameDuration = duracaoDoQuadro(fps)
         let instr = AVMutableVideoCompositionInstruction()
-        instr.timeRange = CMTimeRange(start: .zero, duration: duracaoTotal)
-        let camada = AVMutableVideoCompositionLayerInstruction(assetTrack: vtrack)
+        instr.timeRange = CMTimeRange(start: .zero, duration: duracaoInstr)
+        let camada = AVMutableVideoCompositionLayerInstruction(assetTrack: vUsar)
         camada.setTransform(t, at: .zero)
         instr.layerInstructions = [camada]
         comp.instructions = [instr]
@@ -342,10 +395,10 @@ enum ConversorVideo {
         comp.colorTransferFunction = cor[AVVideoTransferFunctionKey]
         comp.colorYCbCrMatrix = cor[AVVideoYCbCrMatrixKey]
 
-        let reader = try AVAssetReader(asset: asset)
-        reader.timeRange = faixa
+        let reader = try AVAssetReader(asset: fonte)
+        if !veloz { reader.timeRange = faixa }
         let formatoPixel = hdr ? kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange : kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
-        let vOut = AVAssetReaderVideoCompositionOutput(videoTracks: [vtrack],
+        let vOut = AVAssetReaderVideoCompositionOutput(videoTracks: [vUsar],
                                                        videoSettings: [kCVPixelBufferPixelFormatTypeKey as String: formatoPixel])
         vOut.videoComposition = comp
         vOut.alwaysCopiesSampleData = false
@@ -362,20 +415,28 @@ enum ConversorVideo {
         writer.add(vIn)
 
         // áudio: copia o AAC ou recodifica para AAC estéreo
-        var aOut: AVAssetReaderTrackOutput?
+        var aOut: AVAssetReaderOutput?
         var aIn: AVAssetWriterInput?
-        if let atrack {
-            if o.copiarAudio && info.audioAAC {
+        if let atrack, let aUsar {
+            if o.copiarAudio && info.audioAAC && !veloz {
                 let fd = try await atrack.load(.formatDescriptions).first
                 aOut = AVAssetReaderTrackOutput(track: atrack, outputSettings: nil)
                 aIn = AVAssetWriterInput(mediaType: .audio, outputSettings: nil, sourceFormatHint: fd)
             } else {
                 let canais = min(2, max(1, info.canais))
                 let kbps = canais == 1 ? min(o.audioKbps, 192) : o.audioKbps
-                aOut = AVAssetReaderTrackOutput(track: atrack, outputSettings: [
+                let pcm: [String: Any] = [
                     AVFormatIDKey: kAudioFormatLinearPCM, AVLinearPCMBitDepthKey: 16,
                     AVLinearPCMIsFloatKey: false, AVLinearPCMIsNonInterleaved: false,
-                    AVLinearPCMIsBigEndianKey: false, AVNumberOfChannelsKey: canais, AVSampleRateKey: 48000])
+                    AVLinearPCMIsBigEndianKey: false, AVNumberOfChannelsKey: canais, AVSampleRateKey: 48000]
+                if veloz {
+                    // muda o andamento sem mudar o tom
+                    let mix = AVAssetReaderAudioMixOutput(audioTracks: [aUsar], audioSettings: pcm)
+                    mix.audioTimePitchAlgorithm = .spectral
+                    aOut = mix
+                } else {
+                    aOut = AVAssetReaderTrackOutput(track: atrack, outputSettings: pcm)
+                }
                 aIn = AVAssetWriterInput(mediaType: .audio, outputSettings: [
                     AVFormatIDKey: kAudioFormatMPEG4AAC, AVNumberOfChannelsKey: canais,
                     AVSampleRateKey: 48000, AVEncoderBitRateKey: kbps * 1000])
@@ -387,10 +448,10 @@ enum ConversorVideo {
         }
 
         var pares: [(AVAssetReaderOutput, AVAssetWriterInput)] = [(vOut as AVAssetReaderOutput, vIn)]
-        if let aOut, let aIn { pares.append((aOut as AVAssetReaderOutput, aIn)) }
+        if let aOut, let aIn { pares.append((aOut, aIn)) }
         try await Bombeador.bombear(reader: reader, writer: writer,
                                     pares: pares,
-                                    inicio: faixa.start, duracao: CMTimeGetSeconds(faixa.duration),
+                                    inicio: inicioSessao, duracao: CMTimeGetSeconds(duracaoSaida),
                                     cancel: cancel, progresso: progresso)
         return destino
     }
@@ -520,4 +581,50 @@ enum Bombeador {
     }
 
     final class Terminou: @unchecked Sendable { var valor = false; var ultimo = -1.0 }
+}
+
+
+// MARK: - velocidade
+
+enum Velocidade {
+    static let opcoes: [Double] = [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]
+
+    static func nome(_ v: Double) -> String {
+        let f = NumberFormatter()
+        f.locale = Locale(identifier: "pt_BR"); f.minimumFractionDigits = 0; f.maximumFractionDigits = 2
+        return (f.string(from: NSNumber(value: v)) ?? "\(v)") + "×"
+    }
+
+    /// Composição só com o trecho escolhido, com o tempo escalado para a velocidade pedida.
+    static func composicao(_ asset: AVAsset, faixa: CMTimeRange, velocidade: Double, comVideo: Bool) async throws
+        -> (AVMutableComposition, AVMutableCompositionTrack?, AVMutableCompositionTrack?) {
+        let comp = AVMutableComposition()
+        var cv: AVMutableCompositionTrack?
+        var ca: AVMutableCompositionTrack?
+        var videos: [AVAssetTrack] = []
+        if comVideo { videos = try await asset.loadTracks(withMediaType: .video) }
+        // cada trilha entra só com a parte que existe dentro do trecho (pedir além do fim
+        // da trilha faz o insertTimeRange falhar), na mesma posição relativa ao início do trecho
+        func inserir(_ origem: AVAssetTrack, em destino: AVMutableCompositionTrack?) async throws {
+            let existe = try await origem.load(.timeRange)
+            let r = CMTimeRangeGetIntersection(faixa, otherRange: existe)
+            guard CMTimeCompare(r.duration, .zero) > 0 else { return }
+            try destino?.insertTimeRange(r, of: origem, at: CMTimeSubtract(r.start, faixa.start))
+        }
+        if let v = videos.first {
+            cv = comp.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
+            try await inserir(v, em: cv)
+            cv?.preferredTransform = try await v.load(.preferredTransform)
+        }
+        let audios = try await asset.loadTracks(withMediaType: .audio)
+        if let a = audios.first {
+            ca = comp.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
+            try await inserir(a, em: ca)
+        }
+        let dur = comp.duration
+        guard CMTimeCompare(dur, .zero) > 0 else { throw ErroApp("O trecho escolhido está vazio.") }
+        comp.scaleTimeRange(CMTimeRange(start: .zero, duration: dur),
+                            toDuration: CMTimeMultiplyByFloat64(dur, multiplier: 1.0 / max(0.1, velocidade)))
+        return (comp, cv, ca)
+    }
 }

@@ -1,0 +1,822 @@
+Run bash scripts/compilar-codificadores.sh
+  bash scripts/compilar-codificadores.sh
+  # sem isto o Xcode só reclama lá na frente ("lame/lame.h file not found")
+  for f in vendor/include/lame/lame.h vendor/include/vorbis/vorbisenc.h vendor/include/ogg/ogg.h \
+           vendor/lib/libmp3lame.a vendor/lib/libvorbisenc.a vendor/lib/libvorbis.a vendor/lib/libogg.a; do
+    [ -f "$f" ] || { echo "::error::faltou $f"; exit 1; }
+  done
+  echo "codificadores OK"
+  shell: /bin/bash -e {0}
+== LAME
+checking build system type... arm-apple-darwin25.6.0
+checking host system type... arm-apple-darwin
+checking for a BSD-compatible install... /usr/bin/install -c
+checking whether build environment is sane... yes
+checking for arm-apple-darwin-strip... no
+checking for strip... strip
+checking for a thread-safe mkdir -p... ./install-sh -c -d
+checking for gawk... no
+checking for mawk... no
+checking for nawk... no
+checking for awk... awk
+checking whether make sets $(MAKE)... yes
+checking whether make supports nested variables... yes
+checking whether to enable maintainer-specific portions of Makefiles... no
+checking for style of include used by make... GNU
+checking for arm-apple-darwin-gcc... /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang
+checking whether the C compiler works... yes
+checking for C compiler default output file name... a.out
+checking for suffix of executables... 
+checking whether we are cross compiling... yes
+checking for suffix of object files... o
+checking whether we are using the GNU C compiler... yes
+checking whether /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang accepts -g... yes
+checking for /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang option to accept ISO C89... none needed
+checking whether /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang understands -c and -o together... yes
+checking dependency style of /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang... gcc3
+checking how to run the C preprocessor... /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -E
+checking for grep that handles long lines and -e... /usr/bin/grep
+checking for egrep... /usr/bin/grep -E
+checking for ANSI C header files... no
+checking for sys/types.h... yes
+checking for sys/stat.h... yes
+checking for stdlib.h... yes
+checking for string.h... yes
+checking for memory.h... yes
+checking for strings.h... yes
+checking for inttypes.h... yes
+checking for stdint.h... yes
+checking for unistd.h... yes
+checking minix/config.h usability... no
+checking minix/config.h presence... no
+checking for minix/config.h... no
+checking whether it is safe to define __EXTENSIONS__... yes
+checking for library containing strerror... none required
+checking how to print strings... printf
+checking for a sed that does not truncate output... /usr/bin/sed
+checking for fgrep... /usr/bin/grep -F
+checking for ld used by /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang... /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld
+checking if the linker (/Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld) is GNU ld... no
+checking for BSD- or MS-compatible name lister (nm)... no
+checking for arm-apple-darwin-dumpbin... no
+checking for arm-apple-darwin-link... no
+checking for dumpbin... no
+checking for link... link -dump
+configure: WARNING: using cross tools not prefixed with host triplet
+checking the name lister (nm) interface... BSD nm
+checking whether ln -s works... yes
+checking the maximum length of command line arguments... 786432
+checking how to convert arm-apple-darwin25.6.0 file names to arm-apple-darwin format... func_convert_file_noop
+checking how to convert arm-apple-darwin25.6.0 file names to toolchain format... func_convert_file_noop
+checking for /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld option to reload object files... -r
+checking for arm-apple-darwin-objdump... no
+checking for objdump... objdump
+checking how to recognize dependent libraries... pass_all
+checking for arm-apple-darwin-dlltool... no
+checking for dlltool... no
+checking how to associate runtime and link libraries... printf %s\n
+checking for arm-apple-darwin-ar... no
+checking for ar... ar
+checking for archiver @FILE support... no
+checking for arm-apple-darwin-strip... strip
+checking for arm-apple-darwin-ranlib... no
+checking for ranlib... ranlib
+checking command to parse nm output from /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang object... ok
+checking for sysroot... no
+checking for a working dd... /bin/dd
+checking how to truncate binary pipes... /bin/dd bs=4096 count=1
+checking for arm-apple-darwin-mt... no
+checking for mt... no
+checking if : is a manifest tool... no
+checking for arm-apple-darwin-dsymutil... no
+checking for dsymutil... dsymutil
+checking for arm-apple-darwin-nmedit... no
+checking for nmedit... nmedit
+checking for arm-apple-darwin-lipo... no
+checking for lipo... lipo
+checking for arm-apple-darwin-otool... no
+checking for otool... otool
+checking for arm-apple-darwin-otool64... no
+checking for otool64... no
+checking for -single_module linker flag... ld: warning: -single_module is obsolete
+no
+checking for -exported_symbols_list linker flag... yes
+checking for -force_load linker flag... yes
+checking for dlfcn.h... yes
+checking for objdir... .libs
+checking if /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang supports -fno-rtti -fno-exceptions... yes
+checking for /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang option to produce PIC... -fno-common -DPIC
+checking if /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang PIC flag -fno-common -DPIC works... yes
+checking if /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang static flag -static works... no
+checking if /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang supports -c -o file.o... yes
+checking if /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang supports -c -o file.o... (cached) yes
+checking whether the /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang linker (/Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld) supports shared libraries... yes
+checking dynamic linker characteristics... darwin dyld
+checking how to hardcode library paths into programs... immediate
+checking whether stripping libraries is possible... yes
+checking if libtool supports shared libraries... yes
+checking whether to build shared libraries... no
+checking whether to build static libraries... yes
+checking for arm-apple-darwin-gcc... (cached) /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang
+checking whether we are using the GNU C compiler... (cached) yes
+checking whether /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang accepts -g... (cached) yes
+checking for /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang option to accept ISO C89... (cached) none needed
+checking whether /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang understands -c and -o together... (cached) yes
+checking dependency style of /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang... (cached) gcc3
+checking compiler... clang
+checking version of clang... 21.0.0
+checking dmalloc.h usability... no
+checking dmalloc.h presence... no
+checking for dmalloc.h... no
+checking for ANSI C header files... (cached) no
+checking errno.h usability... yes
+checking errno.h presence... no
+configure: WARNING: errno.h: accepted by the compiler, rejected by the preprocessor!
+configure: WARNING: errno.h: proceeding with the compiler's result
+checking for errno.h... yes
+checking fcntl.h usability... yes
+configure: WARNING: fcntl.h: accepted by the compiler, rejected by the preprocessor!
+checking fcntl.h presence... no
+configure: WARNING: fcntl.h: proceeding with the compiler's result
+checking for fcntl.h... yes
+checking limits.h usability... yes
+checking limits.h presence... yes
+checking for limits.h... yes
+checking for stdint.h... (cached) yes
+checking for string.h... (cached) yes
+checking sys/soundcard.h usability... no
+checking sys/soundcard.h presence... no
+checking for sys/soundcard.h... no
+checking sys/time.h usability... yes
+configure: WARNING: sys/time.h: accepted by the compiler, rejected by the preprocessor!
+checking sys/time.h presence... no
+configure: WARNING: sys/time.h: proceeding with the compiler's result
+checking for sys/time.h... yes
+checking for unistd.h... (cached) yes
+checking linux/soundcard.h usability... no
+checking linux/soundcard.h presence... no
+checking for linux/soundcard.h... no
+checking working SSE intrinsics... no
+checking for an ANSI C-conforming const... yes
+checking for inline... inline
+checking for special C compiler options needed for large files... no
+checking for _FILE_OFFSET_BITS value needed for large files... no
+checking size of short... 2
+checking size of unsigned short... 2
+checking size of int... 4
+checking size of unsigned int... 4
+checking size of long... 8
+checking size of unsigned long... 8
+checking size of long long... 8
+checking size of unsigned long long... 8
+checking size of float... 4
+checking size of double... 8
+checking for long double with more range or precision than double... no
+checking for uint8_t... yes
+checking for int8_t... yes
+checking for uint16_t... yes
+checking for int16_t... yes
+checking for uint32_t... yes
+checking for int32_t... yes
+checking for uint64_t... yes
+checking for int64_t... yes
+configure: WARNING: can't check for IEEE854 compliant 80 bit floats
+checking for IEEE854 compliant 80 bit floats... 
+checking for ieee754_float64_t... no
+checking for ieee754_float32_t... no
+configure: WARNING:
+  **************************************************************************
+  *                                                                        *
+  * You are cross compiling:                                               *
+  *   - I did not have a change to determine                               *
+  *     + the size of:                                                     *
+  *       - short                                                          *
+  *       - unsigned short                                                 *
+  *       - int                                                            *
+  *       - unsigned int                                                   *
+  *       - long                                                           *
+  *       - unsigned long                                                  *
+  *       - float                                                          *
+  *       - double                                                         *
+  *       - long double                                                    *
+  *     + the endianess of the system                                      *
+  *   - You have to provide appropriate defines for them in config.h, e.g. *
+  *     + define SIZEOF_SHORT to 2 if the size of a short is 2             *
+  *     + define WORDS_BIGENDIAN if your system is a big endian system     *
+  *                                                                        *
+  **************************************************************************
+checking for size_t... yes
+checking whether time.h and sys/time.h may both be included... yes
+checking for working alloca.h... yes
+checking for alloca... yes
+checking for gettimeofday... yes
+checking for strtol... yes
+checking for socket... yes
+checking termcap.h usability... no
+checking termcap.h presence... no
+checking for termcap.h... no
+checking ncurses/termcap.h usability... no
+checking ncurses/termcap.h presence... no
+checking for ncurses/termcap.h... no
+checking for initscr in -ltermcap... yes
+checking for initscr in -lcurses... yes
+checking for initscr in -lncurses... yes
+checking for ld used by /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang... /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld
+checking if the linker (/Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld) is GNU ld... no
+checking for shared library run path origin... done
+checking for iconv... yes
+checking for working iconv... guessing yes
+checking how to link with libiconv... -liconv
+checking for iconv declaration... 
+         extern size_t iconv (iconv_t cd, char * *inbuf, size_t *inbytesleft, char * *outbuf, size_t *outbytesleft);
+checking for cos in -lm... yes
+checking for cos in -lffm... no
+checking for cos in -lcpml... no
+checking for gtk-config... no
+checking for GTK - version >= 1.2.0... no
+*** The gtk-config script installed by GTK could not be found
+*** If GTK was installed in PREFIX, make sure PREFIX/bin is in
+*** your path, or set the GTK_CONFIG environment variable to the
+*** full path to gtk-config.
+checking use of ElectricFence malloc debugging... no
+checking use of file io... lame
+checking use of analyzer hooks... no
+checking use of mpg123 decoder... no
+checking if the lame frontend should be build... no
+checking if mp3x is requested... no
+configure: WARNING: can't build mp3x because of disabled analyzer hooks
+checking if mp3rtp is requested... no
+checking if dynamic linking of the frontends is requested... no
+checking for termcap... yes
+checking if I have to build the internal vector lib... no
+checking for nasm... no
+checking for additional optimizations... no
+checking for debug options... no
+checking that generated files are newer than configure... done
+configure: creating ./config.status
+config.status: creating Makefile
+config.status: creating libmp3lame/Makefile
+config.status: creating libmp3lame/i386/Makefile
+config.status: creating libmp3lame/vector/Makefile
+config.status: creating frontend/Makefile
+config.status: creating mpglib/Makefile
+config.status: creating doc/Makefile
+config.status: creating doc/html/Makefile
+config.status: creating doc/man/Makefile
+config.status: creating include/Makefile
+config.status: creating Dll/Makefile
+config.status: creating misc/Makefile
+config.status: creating dshow/Makefile
+config.status: creating ACM/Makefile
+config.status: creating ACM/ADbg/Makefile
+config.status: creating ACM/ddk/Makefile
+config.status: creating ACM/tinyxml/Makefile
+config.status: creating lame.spec
+config.status: creating mac/Makefile
+config.status: creating macosx/Makefile
+config.status: creating macosx/English.lproj/Makefile
+config.status: creating macosx/LAME.xcodeproj/Makefile
+config.status: creating vc_solution/Makefile
+config.status: creating config.h
+config.status: executing depfiles commands
+config.status: executing libtool commands
+/Applications/Xcode_26.6.app/Contents/Developer/usr/bin/make  all-recursive
+Making all in mpglib
+/bin/sh ../libtool  --tag=CC   --mode=compile /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -DHAVE_CONFIG_H  -I. -I.. -I../include -I. -I../libmp3lame -I..    -O3 -Wall -arch arm64 -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -mios-version-min=26.0 -O2 -fno-common -MT common.lo -MD -MP -MF .deps/common.Tpo -c -o common.lo common.c
+/bin/sh ../libtool  --tag=CC   --mode=compile /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -DHAVE_CONFIG_H  -I. -I.. -I../include -I. -I../libmp3lame -I..    -O3 -Wall -arch arm64 -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -mios-version-min=26.0 -O2 -fno-common -MT dct64_i386.lo -MD -MP -MF .deps/dct64_i386.Tpo -c -o dct64_i386.lo dct64_i386.c
+/bin/sh ../libtool  --tag=CC   --mode=compile /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -DHAVE_CONFIG_H  -I. -I.. -I../include -I. -I../libmp3lame -I..    -O3 -Wall -arch arm64 -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -mios-version-min=26.0 -O2 -fno-common -MT decode_i386.lo -MD -MP -MF .deps/decode_i386.Tpo -c -o decode_i386.lo decode_i386.c
+libtool: compile:  /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -DHAVE_CONFIG_H -I. -I.. -I../include -I. -I../libmp3lame -I.. -O3 -Wall -arch arm64 -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -mios-version-min=26.0 -O2 -fno-common -MT decode_i386.lo -MD -MP -MF .deps/decode_i386.Tpo -c decode_i386.c -o decode_i386.o
+libtool: compile:  /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -DHAVE_CONFIG_H -I. -I.. -I../include -I. -I../libmp3lame -I.. -O3 -Wall -arch arm64 -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -mios-version-min=26.0 -O2 -fno-common -MT common.lo -MD -MP -MF .deps/common.Tpo -c common.c -o common.o
+libtool: compile:  /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -DHAVE_CONFIG_H -I. -I.. -I../include -I. -I../libmp3lame -I.. -O3 -Wall -arch arm64 -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -mios-version-min=26.0 -O2 -fno-common -MT dct64_i386.lo -MD -MP -MF .deps/dct64_i386.Tpo -c dct64_i386.c -o dct64_i386.o
+common.c:361:9: error: call to undeclared library function 'bcopy' with type 'void (const void *, void *, unsigned long)'; ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+  361 |         memcpy(mp->wordpointer, bsbufold + mp->fsizeold - backstep, (size_t) backstep);
+      |         ^
+./mpg123.h:35:27: note: expanded from macro 'memcpy'
+   35 | #  define memcpy(d, s, n) bcopy ((s), (d), (n))
+      |                           ^
+mv -f .deps/dct64_i386.Tpo .deps/dct64_i386.Plo
+common.c:361:9: note: include the header <strings.h> or explicitly provide a declaration for 'bcopy'
+./mpg123.h:35:27: note: expanded from macro 'memcpy'
+   35 | #  define memcpy(d, s, n) bcopy ((s), (d), (n))
+      |                           ^
+1 error generated.
+make[2]: *** [common.lo] Error 1
+make[2]: *** Waiting for unfinished jobs....
+mv -f .deps/decode_i386.Tpo .deps/decode_i386.Plo
+make[1]: *** [all-recursive] Error 1
+make: *** [all] Error 2
+== libogg
+checking build system type... arm-apple-darwin25.6.0
+checking host system type... arm-apple-darwin
+checking how to print strings... printf
+checking for arm-apple-darwin-gcc... /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang
+checking whether the C compiler works... yes
+checking for C compiler default output file name... a.out
+checking for suffix of executables... 
+checking whether we are cross compiling... yes
+checking for suffix of object files... o
+checking whether we are using the GNU C compiler... yes
+checking whether /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang accepts -g... yes
+checking for /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang option to accept ISO C89... none needed
+checking whether /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang understands -c and -o together... yes
+checking for a sed that does not truncate output... /usr/bin/sed
+checking for grep that handles long lines and -e... /usr/bin/grep
+checking for egrep... /usr/bin/grep -E
+checking for fgrep... /usr/bin/grep -F
+checking for ld used by /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang... /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld
+checking if the linker (/Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld) is GNU ld... no
+checking for BSD- or MS-compatible name lister (nm)... no
+checking for arm-apple-darwin-dumpbin... no
+checking for arm-apple-darwin-link... no
+checking for dumpbin... no
+configure: WARNING: using cross tools not prefixed with host triplet
+checking for link... link -dump
+checking the name lister (nm) interface... BSD nm
+checking whether ln -s works... yes
+checking the maximum length of command line arguments... 786432
+checking how to convert arm-apple-darwin25.6.0 file names to arm-apple-darwin format... func_convert_file_noop
+checking how to convert arm-apple-darwin25.6.0 file names to toolchain format... func_convert_file_noop
+checking for /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld option to reload object files... -r
+checking for arm-apple-darwin-objdump... no
+checking for objdump... objdump
+checking how to recognize dependent libraries... pass_all
+checking for arm-apple-darwin-dlltool... no
+checking for dlltool... no
+checking how to associate runtime and link libraries... printf %s\n
+checking for arm-apple-darwin-ar... no
+checking for ar... ar
+checking for archiver @FILE support... no
+checking for arm-apple-darwin-strip... no
+checking for strip... strip
+checking for arm-apple-darwin-ranlib... no
+checking for ranlib... ranlib
+checking for gawk... no
+checking for mawk... no
+checking for nawk... no
+checking for awk... awk
+checking command to parse nm output from /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang object... ok
+checking for sysroot... no
+checking for a working dd... /bin/dd
+checking how to truncate binary pipes... /bin/dd bs=4096 count=1
+checking for arm-apple-darwin-mt... no
+checking for mt... no
+checking if : is a manifest tool... no
+checking for arm-apple-darwin-dsymutil... no
+checking for dsymutil... dsymutil
+checking for arm-apple-darwin-nmedit... no
+checking for nmedit... nmedit
+checking for arm-apple-darwin-lipo... no
+checking for lipo... lipo
+checking for arm-apple-darwin-otool... no
+checking for otool... otool
+checking for arm-apple-darwin-otool64... no
+checking for otool64... no
+checking for -single_module linker flag... ld: warning: -single_module is obsolete
+no
+checking for -exported_symbols_list linker flag... yes
+checking for -force_load linker flag... yes
+checking how to run the C preprocessor... /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -E
+checking for ANSI C header files... no
+checking for sys/types.h... yes
+checking for sys/stat.h... yes
+checking for stdlib.h... yes
+checking for string.h... yes
+checking for memory.h... yes
+checking for strings.h... yes
+checking for inttypes.h... yes
+checking for stdint.h... yes
+checking for unistd.h... yes
+checking for dlfcn.h... yes
+checking for objdir... .libs
+checking if /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang supports -fno-rtti -fno-exceptions... yes
+checking for /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang option to produce PIC... -fno-common -DPIC
+checking if /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang PIC flag -fno-common -DPIC works... yes
+checking if /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang static flag -static works... no
+checking if /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang supports -c -o file.o... yes
+checking if /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang supports -c -o file.o... (cached) yes
+checking whether the /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang linker (/Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld) supports shared libraries... yes
+checking dynamic linker characteristics... darwin dyld
+checking how to hardcode library paths into programs... immediate
+checking whether stripping libraries is possible... yes
+checking if libtool supports shared libraries... yes
+checking whether to build shared libraries... no
+checking whether to build static libraries... yes
+checking for a BSD-compatible install... /usr/bin/install -c
+checking whether build environment is sane... yes
+checking for arm-apple-darwin-strip... strip
+checking for a thread-safe mkdir -p... ./install-sh -c -d
+checking whether make sets $(MAKE)... yes
+checking whether make supports the include directive... yes (GNU style)
+checking whether make supports nested variables... yes
+checking dependency style of /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang... gcc3
+checking whether to enable maintainer-specific portions of Makefiles... yes
+checking for arm-apple-darwin-gcc... (cached) /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang
+checking whether we are using the GNU C compiler... (cached) yes
+checking whether /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang accepts -g... (cached) yes
+checking for /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang option to accept ISO C89... (cached) none needed
+checking whether /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang understands -c and -o together... (cached) yes
+checking for ANSI C header files... (cached) no
+checking for inttypes.h... (cached) yes
+checking for stdint.h... (cached) yes
+checking for sys/types.h... (cached) yes
+checking for an ANSI C-conforming const... yes
+checking size of int16_t... 2
+checking size of uint16_t... 2
+checking size of u_int16_t... 2
+checking size of int32_t... 4
+checking size of uint32_t... 4
+checking size of u_int32_t... 4
+checking size of int64_t... 8
+checking size of uint64_t... 8
+checking size of short... 2
+checking size of int... 4
+checking size of long... 8
+checking size of long long... 8
+checking for working memcmp... no
+checking that generated files are newer than configure... done
+configure: creating ./config.status
+config.status: creating Makefile
+config.status: creating src/Makefile
+config.status: creating doc/Makefile
+config.status: creating doc/libogg/Makefile
+config.status: creating include/Makefile
+config.status: creating include/ogg/Makefile
+config.status: creating include/ogg/config_types.h
+config.status: creating libogg.spec
+config.status: creating ogg.pc
+config.status: creating ogg-uninstalled.pc
+config.status: creating config.h
+config.status: executing libtool commands
+config.status: executing depfiles commands
+/Applications/Xcode_26.6.app/Contents/Developer/usr/bin/make  all-recursive
+Making all in src
+/Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -DHAVE_CONFIG_H -I. -I..  -I../include -I../include  -D_V_SELFTEST -fno-common -O4 -Wall -fsigned-char -ffast-math -arch arm64 -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -mios-version-min=26.0 -O2 -MT test_bitwise-bitwise.o -MD -MP -MF .deps/test_bitwise-bitwise.Tpo -c -o test_bitwise-bitwise.o `test -f 'bitwise.c' || echo './'`bitwise.c
+/Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -DHAVE_CONFIG_H -I. -I..  -I../include -I../include  -D_V_SELFTEST -fno-common -O4 -Wall -fsigned-char -ffast-math -arch arm64 -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -mios-version-min=26.0 -O2 -MT test_framing-framing.o -MD -MP -MF .deps/test_framing-framing.Tpo -c -o test_framing-framing.o `test -f 'framing.c' || echo './'`framing.c
+/bin/sh ../libtool  --tag=CC   --mode=compile /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -DHAVE_CONFIG_H -I. -I..  -I../include -I../include   -fno-common -O4 -Wall -fsigned-char -ffast-math -arch arm64 -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -mios-version-min=26.0 -O2 -MT framing.lo -MD -MP -MF .deps/framing.Tpo -c -o framing.lo framing.c
+libtool: compile:  /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -DHAVE_CONFIG_H -I. -I.. -I../include -I../include -fno-common -O4 -Wall -fsigned-char -ffast-math -arch arm64 -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -mios-version-min=26.0 -O2 -MT framing.lo -MD -MP -MF .deps/framing.Tpo -c framing.c -o framing.o
+mv -f .deps/framing.Tpo .deps/framing.Plo
+mv -f .deps/test_bitwise-bitwise.Tpo .deps/test_bitwise-bitwise.Po
+/bin/sh ../libtool  --tag=CC   --mode=compile /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -DHAVE_CONFIG_H -I. -I..  -I../include -I../include   -fno-common -O4 -Wall -fsigned-char -ffast-math -arch arm64 -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -mios-version-min=26.0 -O2 -MT bitwise.lo -MD -MP -MF .deps/bitwise.Tpo -c -o bitwise.lo bitwise.c
+/bin/sh ../libtool  --tag=CC   --mode=link /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -D_V_SELFTEST -fno-common -O4 -Wall -fsigned-char -ffast-math -arch arm64 -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -mios-version-min=26.0 -O2  -arch arm64 -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -o test_bitwise test_bitwise-bitwise.o  
+libtool: compile:  /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -DHAVE_CONFIG_H -I. -I.. -I../include -I../include -fno-common -O4 -Wall -fsigned-char -ffast-math -arch arm64 -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -mios-version-min=26.0 -O2 -MT bitwise.lo -MD -MP -MF .deps/bitwise.Tpo -c bitwise.c -o bitwise.o
+mv -f .deps/bitwise.Tpo .deps/bitwise.Plo
+mv -f .deps/test_framing-framing.Tpo .deps/test_framing-framing.Po
+/bin/sh ../libtool  --tag=CC   --mode=link /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang  -fno-common -O4 -Wall -fsigned-char -ffast-math -arch arm64 -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -mios-version-min=26.0 -O2 -no-undefined -version-info 8:5:8 -arch arm64 -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -o libogg.la -rpath /Users/runner/work/estudio-ios/estudio-ios/vendor/lib framing.lo bitwise.lo  
+libtool: link: /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -D_V_SELFTEST -fno-common -O4 -Wall -fsigned-char -ffast-math -arch arm64 -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -mios-version-min=26.0 -O2 -arch arm64 -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -o test_bitwise test_bitwise-bitwise.o 
+/bin/sh ../libtool  --tag=CC   --mode=link /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -D_V_SELFTEST -fno-common -O4 -Wall -fsigned-char -ffast-math -arch arm64 -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -mios-version-min=26.0 -O2  -arch arm64 -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -o test_framing test_framing-framing.o  
+libtool: link: /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -D_V_SELFTEST -fno-common -O4 -Wall -fsigned-char -ffast-math -arch arm64 -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -mios-version-min=26.0 -O2 -arch arm64 -isysroot /Applications/Xcode_26.6.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.5.sdk -o test_framing test_framing-framing.o 
+libtool: link: ar cr .libs/libogg.a  framing.o bitwise.o
+libtool: link: ranlib .libs/libogg.a
+libtool: link: ( cd ".libs" && rm -f "libogg.la" && ln -s "../libogg.la" "libogg.la" )
+Making all in include
+Making all in ogg
+make[3]: Nothing to be done for `all'.
+make[3]: Nothing to be done for `all-am'.
+Making all in doc
+Making all in libogg
+make[3]: Nothing to be done for `all'.
+make[3]: Nothing to be done for `all-am'.
+make[2]: Nothing to be done for `all-am'.
+Making install in src
+ .././install-sh -c -d '/Users/runner/work/estudio-ios/estudio-ios/vendor/lib'
+ /bin/sh ../libtool   --mode=install /usr/bin/install -c   libogg.la '/Users/runner/work/estudio-ios/estudio-ios/vendor/lib'
+libtool: install: /usr/bin/install -c .libs/libogg.lai /Users/runner/work/estudio-ios/estudio-ios/vendor/lib/libogg.la
+libtool: install: /usr/bin/install -c .libs/libogg.a /Users/runner/work/estudio-ios/estudio-ios/vendor/lib/libogg.a
+libtool: install: chmod 644 /Users/runner/work/estudio-ios/estudio-ios/vendor/lib/libogg.a
+libtool: install: ranlib /Users/runner/work/estudio-ios/estudio-ios/vendor/lib/libogg.a
+make[2]: Nothing to be done for `install-data-am'.
+Making install in include
+Making install in ogg
+make[3]: Nothing to be done for `install-exec-am'.
+ ../.././install-sh -c -d '/Users/runner/work/estudio-ios/estudio-ios/vendor/include/ogg'
+ /usr/bin/install -c -m 644 config_types.h '/Users/runner/work/estudio-ios/estudio-ios/vendor/include/ogg'
+ ../.././install-sh -c -d '/Users/runner/work/estudio-ios/estudio-ios/vendor/include/ogg'
+ /usr/bin/install -c -m 644 ogg.h os_types.h '/Users/runner/work/estudio-ios/estudio-ios/vendor/include/ogg'
+make[3]: Nothing to be done for `install-exec-am'.
+make[3]: Nothing to be done for `install-data-am'.
+Making install in doc
+Making install in libogg
+make[3]: Nothing to be done for `install-exec-am'.
+ ../.././install-sh -c -d '/Users/runner/work/estudio-ios/estudio-ios/vendor/share/doc/libogg/libogg'
+ /usr/bin/install -c -m 644 bitpacking.html datastructures.html decoding.html encoding.html general.html index.html ogg_iovec_t.html ogg_packet.html ogg_packet_clear.html ogg_page.html ogg_page_bos.html ogg_page_checksum_set.html ogg_page_continued.html ogg_page_eos.html ogg_page_granulepos.html ogg_page_packets.html ogg_page_pageno.html ogg_page_serialno.html ogg_page_version.html ogg_stream_check.html ogg_stream_clear.html ogg_stream_destroy.html ogg_stream_eos.html ogg_stream_flush.html ogg_stream_flush_fill.html ogg_stream_init.html ogg_stream_iovecin.html ogg_stream_packetin.html ogg_stream_packetout.html ogg_stream_packetpeek.html ogg_stream_pagein.html ogg_stream_pageout.html ogg_stream_pageout_fill.html ogg_stream_reset.html ogg_stream_reset_serialno.html ogg_stream_state.html ogg_sync_buffer.html ogg_sync_check.html ogg_sync_clear.html ogg_sync_destroy.html '/Users/runner/work/estudio-ios/estudio-ios/vendor/share/doc/libogg/libogg'
+ /usr/bin/install -c -m 644 ogg_sync_init.html ogg_sync_pageout.html ogg_sync_pageseek.html ogg_sync_reset.html ogg_sync_state.html ogg_sync_wrote.html oggpack_adv.html oggpack_adv1.html oggpack_bits.html oggpack_buffer.html oggpack_bytes.html oggpack_get_buffer.html oggpack_look.html oggpack_look1.html oggpack_read.html oggpack_read1.html oggpack_readinit.html oggpack_reset.html oggpack_write.html oggpack_writealign.html oggpack_writecheck.html oggpack_writeclear.html oggpack_writecopy.html oggpack_writeinit.html oggpack_writetrunc.html overview.html reference.html style.css '/Users/runner/work/estudio-ios/estudio-ios/vendor/share/doc/libogg/libogg'
+make[3]: Nothing to be done for `install-exec-am'.
+ .././install-sh -c -d '/Users/runner/work/estudio-ios/estudio-ios/vendor/share/doc/libogg'
+ /usr/bin/install -c -m 644 framing.html index.html oggstream.html ogg-multiplex.html fish_xiph_org.png multiplex1.png packets.png pages.png stream.png vorbisword2.png white-ogg.png white-xifish.png rfc3533.txt rfc5334.txt skeleton.html '/Users/runner/work/estudio-ios/estudio-ios/vendor/share/doc/libogg'
+make[2]: Nothing to be done for `install-exec-am'.
+ ./install-sh -c -d '/Users/runner/work/estudio-ios/estudio-ios/vendor/share/aclocal'
+ /usr/bin/install -c -m 644 ogg.m4 '/Users/runner/work/estudio-ios/estudio-ios/vendor/share/aclocal'
+ ./install-sh -c -d '/Users/runner/work/estudio-ios/estudio-ios/vendor/lib/pkgconfig'
+ /usr/bin/install -c -m 644 ogg.pc '/Users/runner/work/estudio-ios/estudio-ios/vendor/lib/pkgconfig'
+== libvorbis
+checking build system type... arm-apple-darwin25.6.0
+checking host system type... arm-apple-darwin
+checking for a BSD-compatible install... /usr/bin/install -c
+checking whether build environment is sane... yes
+checking for arm-apple-darwin-strip... no
+checking for strip... strip
+checking for a thread-safe mkdir -p... ./install-sh -c -d
+checking for gawk... no
+checking for mawk... no
+checking for nawk... no
+checking for awk... awk
+checking whether make sets $(MAKE)... yes
+checking whether make supports nested variables... yes
+checking whether to enable maintainer-specific portions of Makefiles... no
+checking whether make supports nested variables... (cached) yes
+checking for arm-apple-darwin-gcc... /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang
+checking whether the C compiler works... yes
+checking for C compiler default output file name... a.out
+checking for suffix of executables... 
+checking whether we are cross compiling... yes
+checking for suffix of object files... o
+checking whether we are using the GNU C compiler... yes
+checking whether /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang accepts -g... yes
+checking for /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang option to accept ISO C89... none needed
+checking whether /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang understands -c and -o together... yes
+checking whether make supports the include directive... yes (GNU style)
+checking dependency style of /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang... gcc3
+checking how to run the C preprocessor... /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -E
+checking for inline... inline
+checking how to print strings... printf
+checking for a sed that does not truncate output... /usr/bin/sed
+checking for grep that handles long lines and -e... /usr/bin/grep
+checking for egrep... /usr/bin/grep -E
+checking for fgrep... /usr/bin/grep -F
+checking for ld used by /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang... /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld
+checking if the linker (/Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld) is GNU ld... no
+checking for BSD- or MS-compatible name lister (nm)... no
+checking for arm-apple-darwin-dumpbin... no
+checking for arm-apple-darwin-link... no
+configure: WARNING: using cross tools not prefixed with host triplet
+checking for dumpbin... no
+checking for link... link -dump
+checking the name lister (nm) interface... BSD nm
+checking whether ln -s works... yes
+checking the maximum length of command line arguments... 786432
+checking how to convert arm-apple-darwin25.6.0 file names to arm-apple-darwin format... func_convert_file_noop
+checking how to convert arm-apple-darwin25.6.0 file names to toolchain format... func_convert_file_noop
+checking for /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld option to reload object files... -r
+checking for arm-apple-darwin-objdump... objdump
+checking how to recognize dependent libraries... pass_all
+checking for arm-apple-darwin-dlltool... dlltool
+checking how to associate runtime and link libraries... printf %s\n
+checking for arm-apple-darwin-ar... no
+checking for ar... ar
+checking for archiver @FILE support... no
+checking for arm-apple-darwin-strip... strip
+checking for arm-apple-darwin-ranlib... no
+checking for ranlib... ranlib
+checking command to parse nm output from /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang object... ok
+checking for sysroot... no
+checking for a working dd... /bin/dd
+checking how to truncate binary pipes... /bin/dd bs=4096 count=1
+checking for arm-apple-darwin-mt... no
+checking for mt... no
+checking if : is a manifest tool... no
+checking for arm-apple-darwin-dsymutil... no
+checking for dsymutil... dsymutil
+checking for arm-apple-darwin-nmedit... no
+checking for nmedit... nmedit
+checking for arm-apple-darwin-lipo... no
+checking for lipo... lipo
+checking for arm-apple-darwin-otool... no
+checking for otool... otool
+checking for arm-apple-darwin-otool64... no
+checking for otool64... no
+checking for -single_module linker flag... ld: warning: -single_module is obsolete
+no
+checking for -exported_symbols_list linker flag... yes
+checking for -force_load linker flag... yes
+checking for ANSI C header files... no
+checking for sys/types.h... yes
+checking for sys/stat.h... yes
+checking for stdlib.h... yes
+checking for string.h... yes
+checking for memory.h... yes
+checking for strings.h... yes
+checking for inttypes.h... yes
+checking for stdint.h... yes
+checking for unistd.h... yes
+checking for dlfcn.h... yes
+checking for objdir... .libs
+checking if /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang supports -fno-rtti -fno-exceptions... yes
+checking for /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang option to produce PIC... -fno-common -DPIC
+checking if /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang PIC flag -fno-common -DPIC works... yes
+checking if /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang static flag -static works... no
+checking if /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang supports -c -o file.o... yes
+checking if /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang supports -c -o file.o... (cached) yes
+checking whether the /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang linker (/Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld) supports shared libraries... yes
+checking dynamic linker characteristics... darwin dyld
+checking how to hardcode library paths into programs... immediate
+checking whether stripping libraries is possible... yes
+checking if libtool supports shared libraries... yes
+checking whether to build shared libraries... no
+checking whether to build static libraries... yes
+checking GCC version... 21.0.0
+checking if /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang accepts -Wdeclaration-after-statement... yes
+checking for memory.h... (cached) yes
+checking for cos in -lm... yes
+checking for pthread_create in -lpthread... yes
+checking for arm-apple-darwin-pkg-config... no
+checking for pkg-config... /opt/homebrew/bin/pkg-config
+checking pkg-config is at least version 0.9.0... yes
+checking for OGG... yes
+checking for size_t... yes
+checking for working alloca.h... yes
+checking for alloca... yes
+checking for working memcmp... no
+checking that generated files are newer than configure... done
+configure: creating ./config.status
+config.status: creating Makefile
+config.status: creating m4/Makefile
+config.status: creating lib/Makefile
+config.status: creating lib/modes/Makefile
+config.status: creating lib/books/Makefile
+config.status: creating lib/books/coupled/Makefile
+config.status: creating lib/books/uncoupled/Makefile
+config.status: creating lib/books/floor/Makefile
+config.status: creating doc/Makefile
+config.status: creating doc/vorbisfile/Makefile
+config.status: creating doc/vorbisenc/Makefile
+config.status: creating doc/libvorbis/Makefile
+config.status: creating doc/Doxyfile
+config.status: creating include/Makefile
+config.status: creating include/vorbis/Makefile
+config.status: creating examples/Makefile
+config.status: creating test/Makefile
+config.status: creating vq/Makefile
+config.status: creating libvorbis.spec
+config.status: creating vorbis.pc
+config.status: creating vorbisenc.pc
+config.status: creating vorbisfile.pc
+config.status: creating vorbis-uninstalled.pc
+config.status: creating vorbisenc-uninstalled.pc
+config.status: creating vorbisfile-uninstalled.pc
+config.status: creating config.h
+config.status: executing depfiles commands
+config.status: executing libtool commands
+/Applications/Xcode_26.6.app/Contents/Developer/usr/bin/make  all-recursive
+Making all in m4
+make[2]: Nothing to be done for `all'.
+Making all in include
+Making all in vorbis
+make[3]: Nothing to be done for `all'.
+make[3]: Nothing to be done for `all-am'.
+Making all in vq
+make[2]: Nothing to be done for `all'.
+Making all in lib
+Making all in modes
+make[3]: Nothing to be done for `all'.
+Making all in books
+Making all in coupled
+make[4]: Nothing to be done for `all'.
+Making all in uncoupled
+make[4]: Nothing to be done for `all'.
+Making all in floor
+make[4]: Nothing to be done for `all'.
+make[4]: Nothing to be done for `all-am'.
+  CC       smallft.lo
+  CC       mdct.lo
+  CC       test_sharedbook-sharedbook.o
+  CC       block.lo
+  CC       envelope.lo
+  CC       window.lo
+  CC       lsp.lo
+  CC       lpc.lo
+  CC       analysis.lo
+  CC       synthesis.lo
+  CC       psy.lo
+  CC       info.lo
+  CC       floor1.lo
+floor1.c:458:26: warning: variable 'y2b' set but not used [-Wunused-but-set-variable]
+  458 |   double xb=0,yb=0,x2b=0,y2b=0,xyb=0,bn=0;
+      |                          ^
+  CC       floor0.lo
+  CC       res0.lo
+1 warning generated.
+  CC       mapping0.lo
+  CC       registry.lo
+  CC       codebook.lo
+    CC       sharedbook.lo
+  CC       lookup.lo
+  CC       bitrate.lo
+  CC       vorbisfile.lo
+  CC       vorbisenc.lo
+  CCLD     test_sharedbook
+vorbisfile.c:1992:24: warning: unused variable 'fpu' [-Wunused-variable]
+ 1992 |     vorbis_fpu_control fpu;
+      |                        ^~~
+  CCLD     libvorbis.la
+1 warning generated.
+  CCLD     libvorbisfile.la
+  CCLD     libvorbisenc.la
+Making all in test
+make[2]: Nothing to be done for `all'.
+Making all in doc
+Making all in libvorbis
+make[3]: Nothing to be done for `all'.
+Making all in vorbisfile
+make[3]: Nothing to be done for `all'.
+Making all in vorbisenc
+make[3]: Nothing to be done for `all'.
+echo "*** Warning: Documentation build is disabled."
+*** Warning: Documentation build is disabled.
+touch doxygen-build.stamp
+make[2]: Nothing to be done for `all-am'.
+Making install in m4
+make[2]: Nothing to be done for `install-exec-am'.
+make[2]: Nothing to be done for `install-data-am'.
+Making install in include
+Making install in vorbis
+make[3]: Nothing to be done for `install-exec-am'.
+ ../.././install-sh -c -d '/Users/runner/work/estudio-ios/estudio-ios/vendor/include/vorbis'
+ /usr/bin/install -c -m 644 codec.h vorbisfile.h vorbisenc.h '/Users/runner/work/estudio-ios/estudio-ios/vendor/include/vorbis'
+make[3]: Nothing to be done for `install-exec-am'.
+make[3]: Nothing to be done for `install-data-am'.
+Making install in vq
+make[2]: Nothing to be done for `install-exec-am'.
+make[2]: Nothing to be done for `install-data-am'.
+Making install in lib
+Making install in modes
+make[3]: Nothing to be done for `install-exec-am'.
+make[3]: Nothing to be done for `install-data-am'.
+Making install in books
+Making install in coupled
+make[4]: Nothing to be done for `install-exec-am'.
+make[4]: Nothing to be done for `install-data-am'.
+Making install in uncoupled
+make[4]: Nothing to be done for `install-exec-am'.
+make[4]: Nothing to be done for `install-data-am'.
+Making install in floor
+make[4]: Nothing to be done for `install-exec-am'.
+make[4]: Nothing to be done for `install-data-am'.
+make[4]: Nothing to be done for `install-exec-am'.
+make[4]: Nothing to be done for `install-data-am'.
+ .././install-sh -c -d '/Users/runner/work/estudio-ios/estudio-ios/vendor/lib'
+ /bin/sh ../libtool   --mode=install /usr/bin/install -c   libvorbis.la libvorbisfile.la libvorbisenc.la '/Users/runner/work/estudio-ios/estudio-ios/vendor/lib'
+libtool: install: /usr/bin/install -c .libs/libvorbis.lai /Users/runner/work/estudio-ios/estudio-ios/vendor/lib/libvorbis.la
+libtool: install: /usr/bin/install -c .libs/libvorbisfile.lai /Users/runner/work/estudio-ios/estudio-ios/vendor/lib/libvorbisfile.la
+libtool: install: /usr/bin/install -c .libs/libvorbisenc.lai /Users/runner/work/estudio-ios/estudio-ios/vendor/lib/libvorbisenc.la
+libtool: install: /usr/bin/install -c .libs/libvorbis.a /Users/runner/work/estudio-ios/estudio-ios/vendor/lib/libvorbis.a
+libtool: install: chmod 644 /Users/runner/work/estudio-ios/estudio-ios/vendor/lib/libvorbis.a
+libtool: install: ranlib /Users/runner/work/estudio-ios/estudio-ios/vendor/lib/libvorbis.a
+libtool: install: /usr/bin/install -c .libs/libvorbisfile.a /Users/runner/work/estudio-ios/estudio-ios/vendor/lib/libvorbisfile.a
+libtool: install: chmod 644 /Users/runner/work/estudio-ios/estudio-ios/vendor/lib/libvorbisfile.a
+libtool: install: ranlib /Users/runner/work/estudio-ios/estudio-ios/vendor/lib/libvorbisfile.a
+libtool: install: /usr/bin/install -c .libs/libvorbisenc.a /Users/runner/work/estudio-ios/estudio-ios/vendor/lib/libvorbisenc.a
+libtool: install: chmod 644 /Users/runner/work/estudio-ios/estudio-ios/vendor/lib/libvorbisenc.a
+libtool: install: ranlib /Users/runner/work/estudio-ios/estudio-ios/vendor/lib/libvorbisenc.a
+make[3]: Nothing to be done for `install-data-am'.
+Making install in test
+make[2]: Nothing to be done for `install-exec-am'.
+make[2]: Nothing to be done for `install-data-am'.
+Making install in doc
+Making install in libvorbis
+make[3]: Nothing to be done for `install-exec-am'.
+ ../.././install-sh -c -d '/Users/runner/work/estudio-ios/estudio-ios/vendor/share/doc/libvorbis-1.3.7/libvorbis'
+ /usr/bin/install -c -m 644 index.html reference.html style.css vorbis_comment.html vorbis_info.html vorbis_analysis_blockout.html vorbis_analysis_buffer.html vorbis_analysis_headerout.html vorbis_analysis_init.html vorbis_analysis_wrote.html vorbis_analysis.html vorbis_bitrate_addblock.html vorbis_bitrate_flushpacket.html vorbis_block_init.html vorbis_block_clear.html vorbis_dsp_clear.html vorbis_granule_time.html vorbis_version_string.html vorbis_info_blocksize.html vorbis_info_clear.html vorbis_info_init.html vorbis_comment_add.html vorbis_comment_add_tag.html vorbis_comment_clear.html vorbis_comment_init.html vorbis_comment_query.html vorbis_comment_query_count.html vorbis_commentheader_out.html vorbis_packet_blocksize.html vorbis_synthesis.html vorbis_synthesis_blockin.html vorbis_synthesis_halfrate.html vorbis_synthesis_halfrate_p.html vorbis_synthesis_headerin.html vorbis_synthesis_idheader.html vorbis_synthesis_init.html vorbis_synthesis_lapout.html vorbis_synthesis_pcmout.html vorbis_synthesis_read.html vorbis_synthesis_restart.html '/Users/runner/work/estudio-ios/estudio-ios/vendor/share/doc/libvorbis-1.3.7/libvorbis'
+ /usr/bin/install -c -m 644 vorbis_synthesis_trackonly.html vorbis_block.html vorbis_dsp_state.html return.html overview.html '/Users/runner/work/estudio-ios/estudio-ios/vendor/share/doc/libvorbis-1.3.7/libvorbis'
+Making install in vorbisfile
+make[3]: Nothing to be done for `install-exec-am'.
+ ../.././install-sh -c -d '/Users/runner/work/estudio-ios/estudio-ios/vendor/share/doc/libvorbis-1.3.7/vorbisfile'
+ /usr/bin/install -c -m 644 OggVorbis_File.html callbacks.html chaining_example_c.html chainingexample.html crosslap.html datastructures.html decoding.html example.html exampleindex.html fileinfo.html index.html initialization.html ov_bitrate.html ov_bitrate_instant.html ov_callbacks.html ov_clear.html ov_comment.html ov_crosslap.html ov_fopen.html ov_info.html ov_open.html ov_open_callbacks.html ov_pcm_seek.html ov_pcm_seek_lap.html ov_pcm_seek_page.html ov_pcm_seek_page_lap.html ov_pcm_tell.html ov_pcm_total.html ov_raw_seek.html ov_raw_seek_lap.html ov_raw_tell.html ov_raw_total.html ov_read.html ov_read_float.html ov_read_filter.html ov_seekable.html ov_serialnumber.html ov_streams.html ov_test.html ov_test_callbacks.html '/Users/runner/work/estudio-ios/estudio-ios/vendor/share/doc/libvorbis-1.3.7/vorbisfile'
+ /usr/bin/install -c -m 644 ov_test_open.html ov_time_seek.html ov_time_seek_lap.html ov_time_seek_page.html ov_time_seek_page_lap.html ov_time_tell.html ov_time_total.html overview.html reference.html seekexample.html seeking.html seeking_example_c.html seeking_test_c.html seekingexample.html style.css threads.html vorbisfile_example_c.html '/Users/runner/work/estudio-ios/estudio-ios/vendor/share/doc/libvorbis-1.3.7/vorbisfile'
+Making install in vorbisenc
+make[3]: Nothing to be done for `install-exec-am'.
+ ../.././install-sh -c -d '/Users/runner/work/estudio-ios/estudio-ios/vendor/share/doc/libvorbis-1.3.7/vorbisenc'
+ /usr/bin/install -c -m 644 changes.html examples.html index.html ovectl_ratemanage2_arg.html ovectl_ratemanage_arg.html overview.html reference.html style.css vorbis_encode_ctl.html vorbis_encode_init.html vorbis_encode_setup_init.html vorbis_encode_setup_managed.html vorbis_encode_setup_vbr.html vorbis_encode_init_vbr.html '/Users/runner/work/estudio-ios/estudio-ios/vendor/share/doc/libvorbis-1.3.7/vorbisenc'
+make[3]: Nothing to be done for `install-exec-am'.
+/bin/sh /Users/runner/work/estudio-ios/estudio-ios/build-vendor/libvorbis-1.3.7/install-sh -d /Users/runner/work/estudio-ios/estudio-ios/vendor/share/doc/libvorbis-1.3.7
+if test -d vorbis; then \
+	  for dir in vorbis/*; do \
+	    if test -d $dir; then \
+	      b=`basename $dir`; \
+	      /bin/sh /Users/runner/work/estudio-ios/estudio-ios/build-vendor/libvorbis-1.3.7/install-sh -d /Users/runner/work/estudio-ios/estudio-ios/vendor/share/doc/libvorbis-1.3.7/$b; \
+	      for f in $dir/*; do \
+		/usr/bin/install -c -m 644 $f /Users/runner/work/estudio-ios/estudio-ios/vendor/share/doc/libvorbis-1.3.7/$b; \
+	      done \
+	    fi \
+	  done \
+	fi
+ .././install-sh -c -d '/Users/runner/work/estudio-ios/estudio-ios/vendor/share/doc/libvorbis-1.3.7'
+ /usr/bin/install -c -m 644 rfc5215.xml rfc5215.txt eightphase.png fish_xiph_org.png floor1_inverse_dB_table.html floorval.png fourphase.png framing.html helper.html index.html oggstream.html programming.html squarepolar.png stereo.html stream.png v-comment.html vorbis-clip.txt vorbis-errors.txt vorbis-fidelity.html doxygen-build.stamp '/Users/runner/work/estudio-ios/estudio-ios/vendor/share/doc/libvorbis-1.3.7'
+make[2]: Nothing to be done for `install-exec-am'.
+ ./install-sh -c -d '/Users/runner/work/estudio-ios/estudio-ios/vendor/share/aclocal'
+ /usr/bin/install -c -m 644 vorbis.m4 '/Users/runner/work/estudio-ios/estudio-ios/vendor/share/aclocal'
+ ./install-sh -c -d '/Users/runner/work/estudio-ios/estudio-ios/vendor/lib/pkgconfig'
+ /usr/bin/install -c -m 644 vorbis.pc vorbisenc.pc vorbisfile.pc '/Users/runner/work/estudio-ios/estudio-ios/vendor/lib/pkgconfig'
+total 3096
+drwxr-xr-x  11 runner  staff     352 Sep 29 21:42 .
+drwxr-xr-x   5 runner  staff     160 Sep 29 21:41 ..
+-rw-r--r--   1 runner  staff   28912 Sep 29 21:41 libogg.a
+-rwxr-xr-x   1 runner  staff     917 Sep 29 21:41 libogg.la
+-rw-r--r--   1 runner  staff  538448 Sep 29 21:42 libvorbis.a
+-rwxr-xr-x   1 runner  staff    1050 Sep 29 21:42 libvorbis.la
+-rw-r--r--   1 runner  staff  908512 Sep 29 21:42 libvorbisenc.a
+-rwxr-xr-x   1 runner  staff    1127 Sep 29 21:42 libvorbisenc.la
+-rw-r--r--   1 runner  staff   83504 Sep 29 21:42 libvorbisfile.a
+-rwxr-xr-x   1 runner  staff    1129 Sep 29 21:42 libvorbisfile.la
+drwxr-xr-x   6 runner  staff     192 Sep 29 21:42 pkgconfig
+fatal error: /Applications/Xcode_26.6.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/lipo: can't open input file: /Users/runner/work/estudio-ios/estudio-ios/vendor/lib/libmp3lame.a (No such file or directory)
+Error: Process completed with exit code 1.

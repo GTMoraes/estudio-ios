@@ -43,7 +43,9 @@ struct NovoView: View {
                                     Label("Arquivos", systemImage: "folder.fill").frame(maxWidth: .infinity).padding(.vertical, 6)
                                 }
                                 .buttonStyle(.glass)
-                                PhotosPicker(selection: $itemGaleria, matching: .videos) {
+                                // .current: entrega o arquivo original (HEVC/Dolby Vision/60 fps); o padrão
+                                // (.automatic) converte para H.264 SDR 30 fps antes de chegar ao app
+                                PhotosPicker(selection: $itemGaleria, matching: .videos, preferredItemEncoding: .current) {
                                     Label(carregandoGaleria ? "Abrindo…" : "Galeria", systemImage: "photo.on.rectangle")
                                         .frame(maxWidth: .infinity).padding(.vertical, 6)
                                 }

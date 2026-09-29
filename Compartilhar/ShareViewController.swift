@@ -59,7 +59,12 @@ final class ShareViewController: UIViewController {
     private func guardar(_ prov: NSItemProvider) async throws -> Bool {
         let id = UUID().uuidString
         for tipo in [UTType.movie, UTType.audio] where prov.hasItemConformingToTypeIdentifier(tipo.identifier) {
-            let nome = try await copiarArquivo(prov, tipo: tipo, id: id)
+            // pede o tipo exato que o app de origem registrou (o original, ex.: .mov HEVC)
+            // em vez do genérico, que pode vir convertido para "mais compatível"
+            let original = prov.registeredTypeIdentifiers
+                .compactMap { UTType($0) }
+                .first { $0.conforms(to: tipo) } ?? tipo
+            let nome = try await copiarArquivo(prov, tipo: original, id: id)
             try Caixa.guardar(Recebido(id: id, tipo: .arquivo, link: nil, arquivo: nome,
                                        nome: String(nome.dropFirst(id.count + 1)), data: Date()))
             return true

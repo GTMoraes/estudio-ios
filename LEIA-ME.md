@@ -3,14 +3,14 @@
 App de iPhone que junta o whisper.frx9.com e o ConversorMidia: baixar links (YouTube, Instagram…),
 transcrever (texto `.txt` + legenda `.srt`) e tratar voz. Liquid Glass, tema escuro, iOS 26+.
 
-## O que roda onde (versão 0.2)
+## O que roda onde (versão 0.3)
 
 | Função | No iPhone | Na nuvem |
 |---|---|---|
 | Baixar vídeo/áudio de link | — | ✅ (yt-dlp no servidor; o arquivo vem para o iPhone) |
 | Transcrever arquivo ou link | ✅ WhisperKit (large-v3-turbo, Neural Engine) | ✅ "Processar na nuvem" |
 | Tratar voz | (próxima versão) | ✅ modos fala / só voz / música |
-| Converter vídeo (presets do ConversorMidia, HDR, corte, alvo de tamanho) | ✅ chip de vídeo (HEVC/H.264) | (AV1: futuro, pela nuvem) |
+| Converter vídeo (presets do ConversorMidia + os seus, HDR, resolução 1080p/personalizada, qualidade/Mb/s/tamanho, velocidade com o som no mesmo tom, corte) | ✅ chip de vídeo (HEVC/H.264) | (AV1: futuro, pela nuvem) |
 | Extrair/converter áudio: M4A, WAV, MP3, OGG | ✅ (MP3 = LAME, OGG = Vorbis, compilados no app) | — |
 | Converter imagem | (próxima versão) | — |
 

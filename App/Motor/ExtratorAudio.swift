@@ -10,57 +10,82 @@ enum ExtratorAudio {
             throw ErroApp("Esse arquivo não tem áudio.")
         }
         let faixa = ConversorVideo.intervalo(info, o)
-        let duracao = CMTimeGetSeconds(faixa.duration)
         let canais = min(2, max(1, info.canais))
         let taxaOrig = info.taxaAudio > 0 ? info.taxaAudio : 48000
 
+        // velocidade ≠ 1: lê de uma composição com o tempo escalado; o áudio passa pelo
+        // algoritmo que muda o andamento sem mudar o tom (AVAudioTimePitchAlgorithm.spectral)
+        let veloz = abs(o.velocidade - 1) > 0.001
+        var fonte: AVAsset = asset
+        var trilha: AVAssetTrack = track
+        var faixaLeitura: CMTimeRange? = faixa
+        var inicio = faixa.start
+        if veloz {
+            let (comp, _, ca) = try await Velocidade.composicao(asset, faixa: faixa, velocidade: o.velocidade, comVideo: false)
+            guard let ca else { throw ErroApp("Esse arquivo não tem áudio.") }
+            fonte = comp; trilha = ca; faixaLeitura = nil; inicio = .zero
+        }
+        let duracao = CMTimeGetSeconds(faixa.duration) / o.velocidade
+        func saidaAudio(_ ajustes: [String: Any]?) -> AVAssetReaderOutput {
+            if veloz {
+                let m = AVAssetReaderAudioMixOutput(audioTracks: [trilha], audioSettings: ajustes)
+                m.audioTimePitchAlgorithm = .spectral
+                return m
+            }
+            return AVAssetReaderTrackOutput(track: trilha, outputSettings: ajustes)
+        }
+        func novoLeitor() throws -> AVAssetReader {
+            let r = try AVAssetReader(asset: fonte)
+            if let faixaLeitura { r.timeRange = faixaLeitura }
+            return r
+        }
+
         switch o.formatoAudio {
         case .m4a, .wav:
-            let reader = try AVAssetReader(asset: asset)
-            reader.timeRange = faixa
+            let reader = try novoLeitor()
             let ext = o.formatoAudio == .m4a ? "m4a" : "wav"
             let destino = Nuvem.semColisao(pasta.appendingPathComponent("\(base).\(ext)"))
             let writer = try AVAssetWriter(outputURL: destino, fileType: o.formatoAudio == .m4a ? .m4a : .wav)
-            let saida: AVAssetReaderTrackOutput
+            let saida: AVAssetReaderOutput
             let entradaW: AVAssetWriterInput
-            if o.formatoAudio == .m4a && o.copiarAudio && info.audioAAC {
+            if o.formatoAudio == .m4a && o.copiarAudio && info.audioAAC && !veloz {
                 let fd = try await track.load(.formatDescriptions).first
                 saida = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
                 entradaW = AVAssetWriterInput(mediaType: .audio, outputSettings: nil, sourceFormatHint: fd)
             } else if o.formatoAudio == .m4a {
-                saida = AVAssetReaderTrackOutput(track: track, outputSettings: pcm(taxa: 48000, canais: canais, float: false))
+                saida = saidaAudio(pcm(taxa: 48000, canais: canais, float: false))
                 entradaW = AVAssetWriterInput(mediaType: .audio, outputSettings: [
                     AVFormatIDKey: kAudioFormatMPEG4AAC, AVNumberOfChannelsKey: canais,
                     AVSampleRateKey: 48000, AVEncoderBitRateKey: o.audioKbps * 1000])
             } else {
                 let taxa = o.wavTaxa > 0 ? Double(o.wavTaxa) : taxaOrig
-                saida = AVAssetReaderTrackOutput(track: track, outputSettings: pcm(taxa: taxa, canais: canais, float: false))
+                saida = saidaAudio(pcm(taxa: taxa, canais: canais, float: false))
                 entradaW = AVAssetWriterInput(mediaType: .audio, outputSettings: pcm(taxa: taxa, canais: canais, float: false))
             }
             guard reader.canAdd(saida), writer.canAdd(entradaW) else { throw ErroApp("Formato de áudio não suportado.") }
             saida.alwaysCopiesSampleData = false
             reader.add(saida); writer.add(entradaW)
-            try await Bombeador.bombear(reader: reader, writer: writer, pares: [(saida as AVAssetReaderOutput, entradaW)],
-                                        inicio: faixa.start, duracao: duracao, cancel: cancel, progresso: progresso)
+            try await Bombeador.bombear(reader: reader, writer: writer, pares: [(saida, entradaW)],
+                                        inicio: inicio, duracao: duracao, cancel: cancel, progresso: progresso)
             return destino
 
         case .mp3, .ogg:
             let taxa = (taxaOrig == 44100 || taxaOrig == 48000) ? taxaOrig : 48000
             let ext = o.formatoAudio == .mp3 ? "mp3" : "ogg"
             let destino = Nuvem.semColisao(pasta.appendingPathComponent("\(base).\(ext)"))
-            let reader = try AVAssetReader(asset: asset)
-            reader.timeRange = faixa
-            let saida = AVAssetReaderTrackOutput(track: track, outputSettings: pcm(taxa: taxa, canais: canais, float: true))
+            let reader = try novoLeitor()
+            let saida = saidaAudio(pcm(taxa: taxa, canais: canais, float: true))
             saida.alwaysCopiesSampleData = false
             guard reader.canAdd(saida) else { throw ErroApp("Não consegui ler o áudio desse arquivo.") }
             reader.add(saida)
             guard reader.startReading() else {
                 throw ErroApp("Falha ao ler: \(reader.error?.localizedDescription ?? "?")")
             }
+            let inicioLeitura = inicio       // (var não pode entrar na tarefa separada)
             // a codificação é trabalho pesado de CPU: roda fora do ator principal
             try await Task.detached(priority: .userInitiated) {
                 try ExtratorAudio.codificar(reader: reader, saida: saida, destino: destino, mp3: ext == "mp3",
-                              taxa: Int(taxa), canais: canais, o: o, inicio: faixa.start, duracao: duracao,
+                              taxa: Int(taxa), canais: canais, o: o, inicio: inicioLeitura, duracao: duracao,
                               cancel: cancel, progresso: progresso)
             }.value
             return destino
@@ -73,7 +98,7 @@ enum ExtratorAudio {
          AVLinearPCMIsNonInterleaved: false, AVLinearPCMIsBigEndianKey: false]
     }
 
-    private static func codificar(reader: AVAssetReader, saida: AVAssetReaderTrackOutput, destino: URL, mp3: Bool,
+    private static func codificar(reader: AVAssetReader, saida: AVAssetReaderOutput, destino: URL, mp3: Bool,
                                   taxa: Int, canais: Int, o: OpcoesConversao, inicio: CMTime, duracao: Double,
                                   cancel: Cancelamento, progresso: ConversorVideo.Progresso) throws {
         var mp3Cod: OpaquePointer?
