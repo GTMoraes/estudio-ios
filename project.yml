@@ -1,0 +1,106 @@
+name: Estudio
+options:
+  bundleIdPrefix: com.gtm
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+packages:
+  Argmax:
+    url: https://github.com/argmaxinc/argmax-oss-swift
+    # = tag v1.1.0. Fixado por commit: o pacote usa unsafeFlags e o SwiftPM
+    # recusa isso em dependências resolvidas por versão.
+    revision: 1e2a163736dfa5a198e637ae44c114e1c6d5cc2d
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    TARGETED_DEVICE_FAMILY: "1"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGNING_ALLOWED: "NO"
+    CODE_SIGNING_REQUIRED: "NO"
+    CODE_SIGN_IDENTITY: ""
+    DEVELOPMENT_TEAM: ""
+    ENABLE_USER_SCRIPT_SANDBOXING: "NO"
+targets:
+  Estudio:
+    type: application
+    platform: iOS
+    sources:
+      - App
+      - Compartilhado
+    dependencies:
+      - target: Compartilhar
+      - package: Argmax
+        product: WhisperKit
+    entitlements:
+      path: App/Estudio.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.gtm.estudio
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Estúdio
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        UILaunchScreen:
+          UIColorName: Fundo
+        UIApplicationSupportsIndirectInputEvents: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIUserInterfaceStyle: Dark
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: false
+        NSPhotoLibraryAddUsageDescription: Para salvar no Fotos os vídeos que você baixar.
+        CFBundleURLTypes:
+          - CFBundleURLName: com.gtm.estudio
+            CFBundleURLSchemes:
+              - estudio
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Áudio
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - public.audio
+          - CFBundleTypeName: Vídeo
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - public.movie
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.gtm.estudio
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+    scheme: {}
+  Compartilhar:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Compartilhar
+      - Compartilhado
+    entitlements:
+      path: Compartilhar/Compartilhar.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.gtm.estudio
+    info:
+      path: Compartilhar/Info.plist
+      properties:
+        CFBundleDisplayName: Estúdio
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: ShareViewController
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsWebURLWithMaxCount: 1
+              NSExtensionActivationSupportsText: true
+              NSExtensionActivationSupportsMovieWithMaxCount: 5
+              NSExtensionActivationSupportsFileWithMaxCount: 5
+              NSExtensionActivationSupportsAttachmentsWithMaxCount: 5
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.gtm.estudio.compartilhar
