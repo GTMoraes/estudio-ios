@@ -174,7 +174,7 @@ struct LinhaArquivo: View {
 
     private var ext: String { url.pathExtension.lowercased() }
     private var ehVideo: Bool { ["mp4", "mov", "m4v", "webm", "mkv"].contains(ext) }
-    private var ehAudio: Bool { ["mp3", "m4a", "wav", "aac", "opus", "ogg", "flac"].contains(ext) }
+    private var ehAudio: Bool { ["mp3", "m4a", "wav", "aac", "flac"].contains(ext) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {

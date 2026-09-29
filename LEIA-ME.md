@@ -3,14 +3,16 @@
 App de iPhone que junta o whisper.frx9.com e o ConversorMidia: baixar links (YouTube, Instagram…),
 transcrever (texto `.txt` + legenda `.srt`) e tratar voz. Liquid Glass, tema escuro, iOS 26+.
 
-## O que roda onde (versão 0.1)
+## O que roda onde (versão 0.2)
 
 | Função | No iPhone | Na nuvem |
 |---|---|---|
 | Baixar vídeo/áudio de link | — | ✅ (yt-dlp no servidor; o arquivo vem para o iPhone) |
 | Transcrever arquivo ou link | ✅ WhisperKit (large-v3-turbo, Neural Engine) | ✅ "Processar na nuvem" |
 | Tratar voz | (próxima versão) | ✅ modos fala / só voz / música |
-| Converter imagem e vídeo | (próximas versões) | — |
+| Converter vídeo (presets do ConversorMidia, HDR, corte, alvo de tamanho) | ✅ chip de vídeo (HEVC/H.264) | (AV1: futuro, pela nuvem) |
+| Extrair/converter áudio: M4A, WAV, MP3, OGG | ✅ (MP3 = LAME, OGG = Vorbis, compilados no app) | — |
+| Converter imagem | (próxima versão) | — |
 
 A "nuvem" é o whisper.frx9.com, com o mesmo usuário e senha do site — o app usa a mesma API,
 nada muda no servidor. A senha fica no Keychain do iPhone para renovar a sessão sozinho.
@@ -19,7 +21,7 @@ nada muda no servidor. A senha fica no Keychain do iPhone para renovar a sessão
 
 1. Crie um repositório **privado** no GitHub (ex.: `estudio-ios`) e suba o conteúdo desta pasta
    (inclusive a pasta oculta `.github`).
-2. A aba **Actions** roda o "Gerar IPA" a cada envio (~10–15 min; a 1ª vez baixa o WhisperKit).
+2. A aba **Actions** roda o "Gerar IPA" a cada envio (~10–15 min; a 1ª vez baixa o WhisperKit e compila o LAME e o Vorbis, depois fica em cache).
 3. Ao terminar, baixe o artefato **Estudio-ipa** (é um .zip com o `Estudio.ipa` dentro).
 4. Se falhar, baixe o artefato **xcodebuild-log** e me mande — ou copie as linhas `error:` do passo
    "Resumo dos erros".

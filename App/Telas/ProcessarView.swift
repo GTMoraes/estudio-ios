@@ -138,7 +138,7 @@ struct PainelArquivo: View {
     var fechar: () -> Void
 
     enum Acao: String, CaseIterable, Identifiable {
-        case transcrever = "Transcrever", voz = "Tratar voz"
+        case transcrever = "Transcrever", voz = "Tratar voz", converter = "Converter"
         var id: String { rawValue }
     }
 
@@ -163,6 +163,8 @@ struct PainelArquivo: View {
         .pickerStyle(.segmented)
 
         switch acao {
+        case .converter:
+            PainelConverter(arquivo: arquivo, nome: nome, fechar: fechar)
         case .transcrever:
             Cartao(titulo: "Transcrever", icone: "text.quote") {
                 OpcoesTranscricao(naNuvem: $naNuvem, idioma: $idioma)

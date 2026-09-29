@@ -243,6 +243,24 @@ final class Estudio {
         concluir(id, arquivos: nomes, inicio: inicio, duracao: r["audio_secs"] as? Double)
     }
 
+    // --- conversão (no iPhone)
+
+    func converter(_ arquivo: URL, nome: String, info: InfoMidia, opcoes: OpcoesConversao) {
+        let tipo: Item.Tipo = opcoes.acao == .audio || !info.temVideo ? .audio : .video
+        let id = novoItem(tipo, nome, nuvem: false, mensagem: "Convertendo no iPhone")
+        let inicio = Date()
+        rodar(id) {
+            guard let item = self.historico.item(id) else { return }
+            let saida = try await ConversorVideo.converter(arquivo, info: info, opcoes: opcoes, pasta: item.pasta,
+                                                           base: Self.base(nome)) { p in
+                Task { @MainActor in self.etapa(id, "Convertendo no iPhone", p) }
+            }
+            self.concluir(id, arquivos: [saida.lastPathComponent], inicio: inicio,
+                          duracao: PlanoConversao.duracao(info, opcoes))
+            try? FileManager.default.removeItem(at: arquivo)
+        }
+    }
+
     // --- links (baixados sempre pela nuvem)
 
     /// modo: "video" ou "audio"

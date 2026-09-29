@@ -51,7 +51,7 @@ struct NovoView: View {
                                 .disabled(carregandoGaleria)
                             }
                         }
-                        Text("Transcrever (texto e legenda .srt) ou tratar a voz.")
+                        Text("Transcrever (texto e legenda .srt), tratar a voz ou converter (vídeo, MP3, OGG…).")
                             .font(.footnote).foregroundStyle(Tema.texto2)
                     }
 
