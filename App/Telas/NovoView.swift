@@ -69,7 +69,15 @@ struct NovoView: View {
             .navigationTitle("Estúdio")
             .fileImporter(isPresented: $escolhendoArquivo, allowedContentTypes: [.audio, .movie, .audiovisualContent],
                           allowsMultipleSelection: true) { r in
-                if case .success(let urls) = r { urls.forEach { estudio.importar($0) } }
+                // o seletor ainda está fechando quando este bloco roda; abrir a folha agora
+                // faz o iOS descartá-la em silêncio. Espera o seletor sumir.
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 600_000_000)
+                    switch r {
+                    case .success(let urls): urls.forEach { estudio.importar($0) }
+                    case .failure(let erro): estudio.aviso = "Não consegui abrir o arquivo: \(erro.localizedDescription)"
+                    }
+                }
             }
             .onChange(of: itemGaleria) { _, novo in
                 guard let novo else { return }
