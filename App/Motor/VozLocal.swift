@@ -48,9 +48,9 @@ enum ModelosVoz {
         for a in arquivos {
             let destino = caminho(a.nome)
             if tamanho(destino) == a.bytes { feitos += a.bytes; continue }
-            let base = feitos
-            let tmp = try await Baixador().baixar(base.appendingPathComponent(a.nome)) { bytes in
-                progresso(Double(base + bytes) / Double(totalBytes))
+            let antes = feitos
+            let tmp = try await Baixador().baixar(Self.base.appendingPathComponent(a.nome)) { bytes in
+                progresso(Double(antes + bytes) / Double(totalBytes))
             }
             guard tamanho(tmp) == a.bytes else {
                 try? FileManager.default.removeItem(at: tmp)
