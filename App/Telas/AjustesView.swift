@@ -14,7 +14,7 @@ struct AjustesView: View {
     @State private var baixando: Double?
     @State private var msgModelo: String?
     @State private var espaco: Int64 = 0
-    @AppStorage("vozNeuralEngine") private var vozNeuralEngine = false
+    @AppStorage("vozAcelerador") private var vozAcelerador = "cpu"
     @State private var baixandoVoz: Double?
     @State private var msgVoz: String?
     @State private var espacoVoz: Int64 = 0
@@ -48,7 +48,7 @@ struct AjustesView: View {
             }
             .telaEscura()
             .navigationTitle("Ajustes")
-            .onAppear { espaco = TranscritorLocal.tamanhoEmDisco(); espacoVoz = ModelosVoz.tamanhoEmDisco() }
+            .onAppear { espaco = TranscritorLocal.tamanhoEmDisco(); espacoVoz = ModelosVoz.tamanhoEmDisco() + ModelosCoreML.tamanhoEmDisco() }
         }
     }
 
@@ -144,7 +144,7 @@ struct AjustesView: View {
 
     @ViewBuilder private var vozCartao: some View {
         Cartao(titulo: "Tratar voz no iPhone", icone: "waveform") {
-            let pronto = espacoVoz == ModelosVoz.totalBytes
+            let pronto = espacoVoz > 0 && ModelosVoz.prontos
             Label(pronto ? "Modelos de voz baixados" : "Modelos de voz ainda não baixados (290 MB)",
                   systemImage: pronto ? "checkmark.circle.fill" : "arrow.down.circle")
                 .foregroundStyle(pronto ? .green : Tema.texto2)
@@ -165,8 +165,17 @@ struct AjustesView: View {
                     }
                 }
             }
-            Toggle("Usar o Neural Engine", isOn: $vozNeuralEngine)
-            Text("Desligado, o resultado é o mesmo da nuvem. Ligado pode ficar mais rápido, mas o Neural Engine faz as contas com menos precisão e o resultado pode mudar um pouco.")
+            Picker("Onde rodar os modelos", selection: $vozAcelerador) {
+                Text("Processador").tag("cpu")
+                Text("GPU (Core ML)").tag("gpu")
+                Text("Neural Engine (experimental)").tag("ane")
+            }
+            .pickerStyle(.menu)
+            Text(vozAcelerador == "gpu"
+                 ? "GPU: mesmos cálculos em precisão total, deve ser mais rápido. Na 1ª vez baixa mais 290 MB e prepara os modelos. A cada tratamento, o 1º trecho é conferido com o processador; se não bater, volta para o processador sozinho."
+                 : vozAcelerador == "ane"
+                 ? "Neural Engine: pode ser o mais rápido, mas calcula com menos precisão e o resultado pode mudar um pouco. Se derrubar o app, volta para o processador sozinho."
+                 : "Processador: resultado igual ao da nuvem.")
                 .font(.footnote).foregroundStyle(Tema.texto2)
             if let diag = try? String(contentsOf: Diagnostico.arquivo, encoding: .utf8), !diag.isEmpty {
                 DisclosureGroup("Diagnóstico do último tratamento") {
@@ -187,7 +196,7 @@ struct AjustesView: View {
                         .font(.footnote).foregroundStyle(Tema.texto2)
                     Spacer()
                     Button("Apagar modelos", role: .destructive) {
-                        ModelosVoz.apagar(); espacoVoz = ModelosVoz.tamanhoEmDisco()
+                        ModelosVoz.apagar(); ModelosCoreML.apagar(); espacoVoz = ModelosVoz.tamanhoEmDisco()
                     }
                     .font(.footnote)
                 }

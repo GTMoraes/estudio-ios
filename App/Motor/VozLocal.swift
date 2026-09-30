@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import CoreML
 import os
 import OnnxRuntimeBindings   // liga a biblioteca do ONNX Runtime (usada pela API C em mv_ort.c)
 
@@ -144,14 +145,20 @@ enum Diagnostico {
 /// Os modelos rodam no ONNX Runtime pela API C (App/MotorVoz/mv_ort.c).
 private final class HostVoz {
     let ort: OpaquePointer?
+    let coreml: MotorCoreML?
+    /// por modelo: roda no Core ML (GPU)? Vira false se a conferência com o processador falhar.
+    var usarCoreML: [Bool]
+    var caminhosONNX: (String, String) = ("", "")
     var cancelado = false
     let progresso: (Int32, Double) -> Void
     var modelosVistos = Set<Int32>()
     var ultimaEtapa: Int32 = -1
     var ultimoDecimo = -1
 
-    init(ort: OpaquePointer?, progresso: @escaping (Int32, Double) -> Void) {
+    init(ort: OpaquePointer?, coreml: MotorCoreML?, progresso: @escaping (Int32, Double) -> Void) {
         self.ort = ort
+        self.coreml = coreml
+        self.usarCoreML = [coreml != nil, coreml != nil]
         self.progresso = progresso
     }
     deinit { mv_ort_fechar(ort) }
@@ -161,13 +168,54 @@ private final class HostVoz {
         let s = String(cString: mv_ort_erro(ort))
         return s.isEmpty ? nil : s
     }
+
+    /// Na 1ª vez de cada modelo na GPU, roda o mesmo trecho também no processador (ONNX
+    /// Runtime) e compara. Se a diferença passar do aceitável, esse modelo volta para o
+    /// processador e o resultado fica igual ao da nuvem.
+    func conferir(_ modelo: Int32, _ entrada: UnsafePointer<Float>, _ saidaGPU: UnsafeMutablePointer<Float>) {
+        let n = MotorCoreML.formas[Int(modelo)].saida.reduce(1, *)
+        let ref = UnsafeMutablePointer<Float>.allocate(capacity: n)
+        defer { ref.deallocate() }
+        let cpu = mv_ort_abrir(caminhosONNX.0, caminhosONNX.1, 0)
+        defer { mv_ort_fechar(cpu) }
+        guard mv_ort_inferir(UnsafeMutableRawPointer(cpu), modelo, entrada, ref) == 0 else {
+            Diagnostico.log("conferência do modelo \(modelo): o processador falhou; seguindo na GPU sem conferir")
+            return
+        }
+        var sinal = 0.0, erro = 0.0
+        for k in 0..<n {
+            let a = Double(ref[k]), d = a - Double(saidaGPU[k])
+            sinal += a * a; erro += d * d
+        }
+        let snr = erro > 0 ? 10 * log10(sinal / erro) : 200
+        let ok = snr >= 60
+        Diagnostico.log(String(format: "conferência GPU x processador, modelo %d: %.1f dB %@", modelo, snr,
+                               ok ? "(ok)" : "(diferente demais: este modelo volta para o processador)"))
+        if !ok {
+            usarCoreML[Int(modelo)] = false
+            saidaGPU.update(from: ref, count: n)
+        }
+    }
 }
 
 private let cInferir: MVInferir = { ctx, modelo, entrada, saida in
-    guard let ctx else { return -1 }
+    guard let ctx, let entrada, let saida else { return -1 }
     let h = Unmanaged<HostVoz>.fromOpaque(ctx).takeUnretainedValue()
     let primeira = !h.modelosVistos.contains(modelo)
     if primeira { h.modelosVistos.insert(modelo); Diagnostico.log("modelo \(modelo): abrindo e rodando a 1ª vez") }
+    if let cm = h.coreml, h.usarCoreML[Int(modelo)] {
+        do {
+            try cm.inferir(Int(modelo), entrada, saida)
+            if primeira {
+                Diagnostico.log("modelo \(modelo): 1ª inferência na GPU ok")
+                h.conferir(modelo, entrada, saida)
+            }
+            return 0
+        } catch {
+            Diagnostico.log("modelo \(modelo): Core ML falhou (\(error.localizedDescription)); voltando para o processador")
+            h.usarCoreML[Int(modelo)] = false
+        }
+    }
     let r = mv_ort_inferir(UnsafeMutableRawPointer(h.ort), modelo, entrada, saida)
     if primeira || r != 0 {
         let e = h.ort.map { String(cString: mv_ort_erro($0)) } ?? ""
@@ -193,6 +241,17 @@ private let cCancelado: MVCancelado = { ctx in
 enum VozLocal {
     /// Tamanho do bloco: a memória depende dele, não da duração do áudio.
     static let blocoSegundos = 300.0
+
+    /// O Core ML pode derrubar o app ao preparar o modelo (exceção que não dá para capturar).
+    /// Marca a tentativa antes; se o app abrir de novo com a marca, desliga o Neural Engine.
+    private static let chaveTentando = "vozNeuralTentando"
+    static func neuralDerrubouOApp() -> Bool {
+        let d = UserDefaults.standard
+        guard d.bool(forKey: chaveTentando) else { return false }
+        d.set(false, forKey: chaveTentando)
+        d.set("cpu", forKey: "vozAcelerador")
+        return true
+    }
 
     /// Trata `arquivo` e grava os MP3 em `pasta`. Devolve os nomes (mix, voz, trilha).
     static func tratar(_ arquivo: URL, opcoes: OpcoesVozLocal, pasta: URL, base: String,
@@ -234,11 +293,22 @@ enum VozLocal {
         op.bloco_seg = blocoSegundos
 
         let nomesEtapa = ["Lendo o áudio", "Separando voz e trilha", "Tirando o eco", "Montando os arquivos"]
-        let neural: Int32 = UserDefaults.standard.bool(forKey: "vozNeuralEngine") ? 1 : 0
-        let host = HostVoz(ort: mv_ort_abrir(ModelosVoz.caminho(ModelosVoz.arquivos[0].nome).path,
-                                             ModelosVoz.caminho(ModelosVoz.arquivos[1].nome).path, neural)) { etapa, f in
+        // onde rodar os modelos: "cpu" (padrão, igual à nuvem), "gpu" (Core ML, float32) ou "ane" (Neural Engine)
+        let acel = UserDefaults.standard.string(forKey: "vozAcelerador") ?? "cpu"
+        if acel == "gpu" && !ModelosCoreML.prontos {
+            Diagnostico.log("preparando os modelos da GPU")
+            try await ModelosCoreML.preparar(progresso: progresso)
+        }
+        let neural: Int32 = acel == "ane" ? 1 : 0
+        if acel != "cpu" { UserDefaults.standard.set(true, forKey: chaveTentando); UserDefaults.standard.synchronize() }
+        defer { UserDefaults.standard.set(false, forKey: chaveTentando) }
+        Diagnostico.log("modelos rodando em: \(acel == "gpu" ? "GPU (Core ML)" : acel == "ane" ? "Neural Engine" : "processador")")
+        let onnx0 = ModelosVoz.caminho(ModelosVoz.arquivos[0].nome).path, onnx1 = ModelosVoz.caminho(ModelosVoz.arquivos[1].nome).path
+        let host = HostVoz(ort: mv_ort_abrir(onnx0, onnx1, neural),
+                           coreml: acel == "gpu" ? MotorCoreML(unidades: .cpuAndGPU) : nil) { etapa, f in
             progresso(nomesEtapa[Int(max(0, min(3, etapa)))], f)
         }
+        host.caminhosONNX = (onnx0, onnx1)
         let caminhos = [entrada.path, tmp.path, pasta.appendingPathComponent(nVoz).path,
                         pasta.appendingPathComponent(nTri).path, pasta.appendingPathComponent(nMix).path]
         let opC = op
@@ -267,7 +337,10 @@ enum VozLocal {
             host.cancelado = true
         }
         let ne = mv_ort_neural_ativo(host.ort)
-        Diagnostico.log("fim: r=\(r) \(msg) · Neural Engine: separação \(ne & 1 != 0 ? "sim" : "não"), eco \(ne & 2 != 0 ? "sim" : "não")")
+        func onde(_ i: Int) -> String {
+            host.coreml != nil && host.usarCoreML[i] ? "GPU" : (ne & Int32(1 << i)) != 0 ? "Neural Engine" : "processador"
+        }
+        Diagnostico.log("fim: r=\(r) \(msg) · separação: \(onde(0)), eco: \(onde(1))")
         if r == 1 { throw CancellationError() }
         if r != 0 {
             for n in [nVoz, nTri, nMix] { try? FileManager.default.removeItem(at: pasta.appendingPathComponent(n)) }

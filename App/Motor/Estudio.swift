@@ -325,6 +325,9 @@ final class Estudio {
     /// Trabalhos da nuvem continuam lá mesmo com o app fechado: retoma o
     /// acompanhamento. Os do iPhone foram interrompidos junto com o app.
     func retomar() {
+        if VozLocal.neuralDerrubouOApp() {
+            aviso = "O Neural Engine fechou o app no último tratamento de voz e foi desligado. O tratamento volta a rodar no processador (mesmo resultado da nuvem)."
+        }
         for i in historico.itens where i.estado == .processando && tarefas[i.id] == nil {
             if i.naNuvem, let job = i.trabalho {
                 let id = i.id, inicio = i.criado, base = Self.base(i.titulo), tipo = i.tipo

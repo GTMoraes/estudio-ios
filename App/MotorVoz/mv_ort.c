@@ -7,7 +7,6 @@
 
 #ifdef __APPLE__
 /* coreml_provider_factory.h (ORT 1.19.2): a biblioteca do iOS exporta esta função */
-enum { MV_COREML_FLAG_CREATE_MLPROGRAM = 0x010 };
 ORT_EXPORT ORT_API_STATUS(OrtSessionOptionsAppendExecutionProvider_CoreML, _In_ OrtSessionOptions* options,
                           uint32_t coreml_flags);
 #endif
@@ -56,7 +55,8 @@ static OrtSession *criar(MVOrt *o, const char *caminho, int neural) {
              && !falhou(o, api->AddFreeDimensionOverrideByName(so, "batch_size", 1));
     if (ok && neural) {
 #ifdef __APPLE__
-        ok = !falhou(o, OrtSessionOptionsAppendExecutionProvider_CoreML(so, MV_COREML_FLAG_CREATE_MLPROGRAM));
+        /* formato NeuralNetwork: o MLProgram gerado pela 1.19 derruba o Core ML do iOS 27 */
+        ok = !falhou(o, OrtSessionOptionsAppendExecutionProvider_CoreML(so, 0));
 #else
         ok = 0;
 #endif
