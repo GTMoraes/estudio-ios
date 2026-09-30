@@ -230,3 +230,55 @@ int cod_webp(const unsigned char *rgba, int largura, int altura, int passo, int 
 }
 
 void cod_webp_liberar(unsigned char *p) { WebPFree(p); }
+
+
+/* ------------------------------------------------------------------ WebP animado */
+struct CodWebPAnim {
+    WebPAnimEncoder *enc;
+    WebPConfig config;
+    int largura, altura;
+};
+
+CodWebPAnim *cod_webpanim_abrir(int largura, int altura, float qualidade, int laco) {
+    CodWebPAnim *a = calloc(1, sizeof *a);
+    if (!a) return NULL;
+    WebPAnimEncoderOptions op;
+    if (!WebPAnimEncoderOptionsInit(&op) || !WebPConfigInit(&a->config)) { free(a); return NULL; }
+    op.anim_params.loop_count = laco == 1 ? 1 : 0;
+    op.anim_params.bgcolor = 0xFF000000u;
+    op.allow_mixed = 0;
+    op.minimize_size = 0;
+    a->config.quality = qualidade;
+    a->config.method = 4;
+    if (!WebPValidateConfig(&a->config)) { free(a); return NULL; }
+    a->largura = largura; a->altura = altura;
+    a->enc = WebPAnimEncoderNew(largura, altura, &op);
+    if (!a->enc) { free(a); return NULL; }
+    return a;
+}
+
+int cod_webpanim_quadro(CodWebPAnim *a, const unsigned char *bgra, int passo, int tempo_ms) {
+    if (!a || !a->enc) return -1;
+    WebPPicture p;
+    if (!WebPPictureInit(&p)) return -2;
+    p.width = a->largura; p.height = a->altura;
+    p.use_argb = 1;
+    if (!WebPPictureImportBGRX(&p, bgra, passo)) { WebPPictureFree(&p); return -3; }
+    int ok = WebPAnimEncoderAdd(a->enc, &p, tempo_ms, &a->config);
+    WebPPictureFree(&p);
+    return ok ? 0 : -4;
+}
+
+int cod_webpanim_fechar(CodWebPAnim *a, int tempo_fim_ms, unsigned char **saida, size_t *tam) {
+    int r = 0;
+    *saida = NULL; *tam = 0;
+    if (!a) return -1;
+    WebPData d;
+    WebPDataInit(&d);
+    if (!a->enc || !WebPAnimEncoderAdd(a->enc, NULL, tempo_fim_ms, NULL)) r = -2;
+    else if (!WebPAnimEncoderAssemble(a->enc, &d)) r = -3;
+    else { *saida = (unsigned char *)d.bytes; *tam = d.size; }
+    if (a->enc) WebPAnimEncoderDelete(a->enc);
+    free(a);
+    return r;
+}

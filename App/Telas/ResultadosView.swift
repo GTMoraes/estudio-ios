@@ -235,7 +235,7 @@ struct LinhaArquivo: View {
     private var ext: String { url.pathExtension.lowercased() }
     private var ehVideo: Bool { ["mp4", "mov", "m4v", "webm", "mkv"].contains(ext) }
     private var ehAudio: Bool { ["mp3", "m4a", "wav", "aac", "flac"].contains(ext) }
-    private var ehFoto: Bool { ["jpg", "jpeg", "png", "heic", "webp", "avif", "tif", "tiff"].contains(ext) }
+    private var ehFoto: Bool { ["jpg", "jpeg", "png", "heic", "webp", "avif", "gif", "tif", "tiff"].contains(ext) }
     @State private var miniatura: UIImage?
 
     var body: some View {

@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import Photos
+import ImageIO
 
 // MARK: - grade de miniaturas (resultado de imagens)
 
@@ -157,6 +158,9 @@ struct PainelInfoImagem: View {
                     linha("Tamanho", bytes(d.bytes), difTamanho(d))
                     linha("Cor", d.perfil ?? "Sem perfil (lido como sRGB)", nil)
                     if d.alfa { linha("Transparência", "Sim", nil) }
+                    if d.quadros > 1 {
+                        linha("Animação", "\(d.quadros) quadros" + (d.duracao.map { String(format: " · %.1f s", $0).replacingOccurrences(of: ".", with: ",") } ?? ""), nil)
+                    }
                     linha("Localização", d.gps ? "Tem GPS" : "Sem GPS", nil)
                     if let o = origem {
                         linha("Arquivo original", o.nome,
@@ -233,8 +237,16 @@ struct ZoomImagem: UIViewRepresentable {
         let v = RolagemZoom()
         let u = url
         Task { @MainActor in
-            let cg = await Task.detached(priority: .userInitiated) { ConversorImagem.miniatura(u, lado: 2800) }.value
-            if let cg { v.imagem.image = UIImage(cgImage: cg) }
+            // GIF / WebP animado: toca a animação; foto: imagem grande para o zoom
+            let r: (UIImage?) = await Task.detached(priority: .userInitiated) { () -> UIImage? in
+                // muitos quadros: reduz mais, para caber na memória
+                if let src = CGImageSourceCreateWithURL(u as CFURL, nil), CGImageSourceGetCount(src) > 1,
+                   let a = ConversorImagem.animacao(src, lado: CGImageSourceGetCount(src) > 200 ? 480 : 800), !a.quadros.isEmpty {
+                    return UIImage.animatedImage(with: a.quadros.map { UIImage(cgImage: $0) }, duration: a.duracao)
+                }
+                return ConversorImagem.miniatura(u, lado: 2800).map { UIImage(cgImage: $0) }
+            }.value
+            if let r { v.imagem.image = r }
         }
         return v
     }

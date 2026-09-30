@@ -26,4 +26,13 @@ int cod_webp(const unsigned char *rgba, int largura, int altura, int passo, int 
              unsigned char **saida, size_t *tam);
 void cod_webp_liberar(unsigned char *p);
 
+/* WebP animado (libwebpmux / WebPAnimEncoder). Quadros BGRA 8 bits, opacos, todos do mesmo tamanho.
+   tempo_ms = instante do quadro desde o início. laco: 0 = repete para sempre, 1 = toca uma vez. */
+typedef struct CodWebPAnim CodWebPAnim;
+CodWebPAnim *cod_webpanim_abrir(int largura, int altura, float qualidade, int laco);
+int cod_webpanim_quadro(CodWebPAnim *a, const unsigned char *bgra, int passo, int tempo_ms);
+/* fecha e entrega o arquivo (liberar com cod_webp_liberar); tempo_fim_ms = fim do último quadro.
+   Libera o codificador em qualquer caso. */
+int cod_webpanim_fechar(CodWebPAnim *a, int tempo_fim_ms, unsigned char **saida, size_t *tam);
+
 #endif

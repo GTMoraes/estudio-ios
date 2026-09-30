@@ -2,6 +2,8 @@ import Foundation
 import AVFoundation
 import VideoToolbox
 import CoreMedia
+import CoreImage
+import ImageIO
 
 // MARK: - o que o arquivo tem
 
@@ -97,7 +99,7 @@ struct InfoMidia: Equatable {
 // MARK: - opções
 
 struct OpcoesConversao: Codable, Equatable {
-    enum Acao: String, Codable, CaseIterable { case video, semRecodificar, audio }
+    enum Acao: String, Codable, CaseIterable { case video, semRecodificar, audio, gif, webpAnimado }
     enum Codec: String, Codable, CaseIterable { case hevc, h264 }
     enum Saida: String, Codable { case manterHDR, sdr }
     enum FormatoAudio: String, Codable, CaseIterable, Identifiable {
@@ -137,11 +139,58 @@ struct OpcoesConversao: Codable, Equatable {
     var usarDataAtual: Bool { get { dataAgora ?? false } set { dataAgora = newValue } }
     var manterLocalizacao: Bool { get { manterLocal ?? false } set { manterLocal = newValue } }
 
+    /// Recorte / encaixe do quadro (nil = como o original). Vale para vídeo, GIF e WebP animado.
+    var enquadramento: Enquadramento?
+    // GIF e WebP animado (opcionais pelo mesmo motivo)
+    var animLargura: Int?            // largura do resultado em px (nunca aumenta)
+    var animFps: Int?
+    var animRepetir: Bool?
+    var animQualidade: Double?       // WebP: 0…100
+    var larguraAnimada: Int { get { animLargura ?? 480 } set { animLargura = newValue } }
+    var fpsAnimado: Int { get { animFps ?? 15 } set { animFps = newValue } }
+    var repetirAnimado: Bool { get { animRepetir ?? true } set { animRepetir = newValue } }
+    var qualidadeAnimada: Double { get { animQualidade ?? 75 } set { animQualidade = newValue } }
+
+    var animado: Bool { acao == .gif || acao == .webpAnimado }
+    /// Recodifica os quadros (onde o enquadramento se aplica)
+    var refazQuadros: Bool { acao == .video || animado }
+
     var extensaoVideo: String { acao == .semRecodificar ? "" : "mp4" }
 }
 
+/// Como o quadro do vídeo vai para o resultado.
+struct Enquadramento: Codable, Equatable {
+    enum Modo: String, Codable, CaseIterable, Identifiable {
+        case preencher, caber, desfocar, livre
+        var id: String { rawValue }
+        var nome: String {
+            switch self {
+            case .preencher: return "Preencher"
+            case .caber: return "Caber"
+            case .desfocar: return "Desfocado"
+            case .livre: return "Livre"
+            }
+        }
+        var dica: String {
+            switch self {
+            case .preencher: return "O vídeo cobre o formato inteiro; arraste e amplie para escolher o que fica."
+            case .caber: return "O vídeo inteiro dentro do formato, com barras pretas onde sobrar."
+            case .desfocar: return "O vídeo inteiro dentro do formato; o espaço que sobra é o próprio vídeo ampliado e desfocado."
+            case .livre: return "Um retângulo qualquer do vídeo; o resultado sai no tamanho dele."
+            }
+        }
+    }
+    var modo: Modo = .preencher
+    var proporcao: Double = 0.8          // largura/altura do resultado (preencher, caber, desfocar)
+    var recorte = Recorte()              // região do vídeo, 0…1, já girado (preencher e livre)
+
+    static let proporcoes: [(nome: String, valor: Double)] = [
+        ("9:16", 9.0 / 16), ("4:5", 0.8), ("1:1", 1), ("4:3", 4.0 / 3), ("16:9", 16.0 / 9),
+    ]
+}
+
 enum PresetConversao: String, CaseIterable, Identifiable {
-    case instagramHDR, instagramCopia, instagramSDR, qualidade, menor, davinci, alvo, cortar, audio, personalizado
+    case instagramHDR, instagramCopia, instagramSDR, qualidade, menor, davinci, alvo, cortar, audio, gif, webpAnimado, personalizado
     var id: String { rawValue }
 
     var nome: String {
@@ -155,6 +204,8 @@ enum PresetConversao: String, CaseIterable, Identifiable {
         case .alvo: return "Alvo de tamanho"
         case .cortar: return "Cortar sem recodificar"
         case .audio: return "Extrair áudio"
+        case .gif: return "GIF"
+        case .webpAnimado: return "WebP animado"
         case .personalizado: return "Personalizado"
         }
     }
@@ -170,6 +221,8 @@ enum PresetConversao: String, CaseIterable, Identifiable {
         case .alvo: return "Você diz quantos MB; a taxa é calculada para caber (uma passagem, fica perto do alvo)."
         case .cortar: return "Corta o trecho escolhido sem recodificar (perda zero; o corte cai no keyframe)."
         case .audio: return "M4A (copia o AAC quando dá), MP3, OGG ou WAV."
+        case .gif: return "Animação que abre em qualquer lugar. Limitado a 256 cores por quadro (degradês e pele ficam com faixas) e arquivo grande; HDR vira SDR. Sem som."
+        case .webpAnimado: return "Animação com cores completas e arquivo 3 a 5× menor que o GIF. Abre em navegadores, WhatsApp e Telegram; alguns lugares só aceitam GIF. Sem som."
         case .personalizado: return "Os ajustes abaixo mandam."
         }
     }
@@ -188,9 +241,15 @@ enum PresetConversao: String, CaseIterable, Identifiable {
         case .alvo: n.codec = .hevc; n.ladoMenor = 1080; n.modoTaxa = .alvo; n.alvoMB = 50; n.copiarAudio = false; n.audioKbps = 128
         case .cortar: n.acao = .semRecodificar
         case .audio: n.acao = .audio
+        case .gif: n.acao = .gif; n.larguraAnimada = 480; n.fpsAnimado = 15
+        case .webpAnimado: n.acao = .webpAnimado; n.larguraAnimada = 480; n.fpsAnimado = 15; n.qualidadeAnimada = 75
         case .personalizado: n = o
         }
         (n.inicio, n.fim) = trecho
+        // escolhas do arquivo, não do preset
+        n.enquadramento = o.enquadramento
+        n.dataAgora = o.dataAgora
+        n.manterLocal = o.manterLocal
         if n.acao != .semRecodificar { n.velocidade = velocidade }
         o = n
     }
@@ -200,8 +259,39 @@ enum PresetConversao: String, CaseIterable, Identifiable {
 
 enum PlanoConversao {
     /// Dimensões de saída: nunca aumenta, mantém proporção, números pares.
+    /// Tamanho "cheio" do resultado antes da escolha de resolução: o do vídeo, ou o do
+    /// enquadramento (a região recortada, ou o formato que contém o vídeo inteiro).
+    static func base(_ info: InfoMidia, _ o: OpcoesConversao) -> (Double, Double) {
+        let W = Double(max(info.largura, 2)), H = Double(max(info.altura, 2))
+        guard o.refazQuadros, let e = o.enquadramento else { return (W, H) }
+        switch e.modo {
+        case .preencher, .livre:
+            return (max(2, e.recorte.largura * W), max(2, e.recorte.altura * H))
+        case .caber, .desfocar:
+            let p = e.proporcao > 0 ? e.proporcao : W / H
+            return W / H > p ? (W, W / p) : (H * p, H)
+        }
+    }
+
+    /// Dimensões do resultado para qualquer ação.
+    static func dimensoesSaida(_ info: InfoMidia, _ o: OpcoesConversao) -> (Int, Int) {
+        switch o.acao {
+        case .semRecodificar, .audio: return (info.largura, info.altura)
+        case .gif, .webpAnimado: return dimensoesAnimado(info, o)
+        case .video: return dimensoes(info, o)
+        }
+    }
+
+    /// GIF / WebP animado: largura escolhida (nunca aumenta), altura pela proporção, números pares.
+    static func dimensoesAnimado(_ info: InfoMidia, _ o: OpcoesConversao) -> (Int, Int) {
+        let (w, h) = base(info, o)
+        let escala = min(1, Double(o.larguraAnimada) / w)
+        func par(_ x: Double) -> Int { max(2, Int((x * escala / 2).rounded()) * 2) }
+        return (par(w), par(h))
+    }
+
     static func dimensoes(_ info: InfoMidia, _ o: OpcoesConversao) -> (Int, Int) {
-        let w = Double(max(info.largura, 2)), h = Double(max(info.altura, 2))
+        let (w, h) = base(info, o)
         var escala = 1.0
         if o.ladoMenor > 0 {
             escala = min(1, Double(o.ladoMenor) / min(w, h))
@@ -218,7 +308,7 @@ enum PlanoConversao {
     }
 
     static func hdrSaida(_ info: InfoMidia, _ o: OpcoesConversao) -> Bool {
-        info.hdr != .sdr && o.codec == .hevc && o.saida == .manterHDR
+        !o.animado && info.hdr != .sdr && o.codec == .hevc && o.saida == .manterHDR
     }
 
     /// Duração do resultado (trecho ÷ velocidade; sem recodificar a velocidade não se aplica).
@@ -276,6 +366,12 @@ enum PlanoConversao {
             return Int64(bps * dur / 8)
         case .video:
             return Int64((taxaVideo(info, o) + audioBps(info, o)) * dur / 8)
+        case .gif, .webpAnimado:
+            // estimativa grosseira: bytes por pixel por quadro medidos em vídeos de celular
+            let (w, h) = dimensoesAnimado(info, o)
+            let quadros = dur * Double(o.fpsAnimado)
+            let bpp = o.acao == .gif ? 0.26 : 0.02 + 0.0006 * o.qualidadeAnimada
+            return Int64(Double(w * h) * quadros * bpp)
         }
     }
 }
@@ -308,6 +404,9 @@ enum ConversorVideo {
             case .video:
                 return try await recodificar(entrada, info: info, o: o, pasta: pasta, base: base,
                                              cancel: cancel, progresso: progresso)
+            case .gif, .webpAnimado:
+                return try await Animacao.gerar(entrada, info: info, o: o, pasta: pasta, base: base,
+                                                cancel: cancel, progresso: progresso)
             }
         } onCancel: { cancel.cancelar() }
     }
@@ -378,28 +477,10 @@ enum ConversorVideo {
             duracaoSaida = c.duration
         }
 
-        // composição: orientação, escala, fps constante e espaço de cor de saída
-        let exib = CGRect(origin: .zero, size: tam).applying(transf)
-        // escala por eixo: w/h foram arredondados para par, então uma escala única
-        // deixaria sobra/corte de ~1 px numa das bordas
-        let escalaX = CGFloat(w) / max(abs(exib.width), 1)
-        let escalaY = CGFloat(h) / max(abs(exib.height), 1)
-        let t = transf
-            .concatenating(CGAffineTransform(translationX: -exib.minX, y: -exib.minY))
-            .concatenating(CGAffineTransform(scaleX: escalaX, y: escalaY))
-        let comp = AVMutableVideoComposition()
-        comp.renderSize = CGSize(width: w, height: h)
-        comp.frameDuration = duracaoDoQuadro(fps)
-        let instr = AVMutableVideoCompositionInstruction()
-        instr.timeRange = CMTimeRange(start: .zero, duration: duracaoInstr)
-        let camada = AVMutableVideoCompositionLayerInstruction(assetTrack: vUsar)
-        camada.setTransform(t, at: .zero)
-        instr.layerInstructions = [camada]
-        comp.instructions = [instr]
+        // composição: orientação, enquadramento, escala, fps constante e espaço de cor de saída
         let cor = coresDeSaida(info, hdr: hdr)
-        comp.colorPrimaries = cor[AVVideoColorPrimariesKey]
-        comp.colorTransferFunction = cor[AVVideoTransferFunctionKey]
-        comp.colorYCbCrMatrix = cor[AVVideoYCbCrMatrixKey]
+        let comp = try await composicao(fonte: fonte, trilha: vUsar, tam: tam, transf: transf, duracao: duracaoInstr,
+                                        o: o, w: w, h: h, fps: fps, cor: cor)
 
         let reader = try AVAssetReader(asset: fonte)
         if !veloz { reader.timeRange = faixa }
@@ -500,6 +581,92 @@ enum ConversorVideo {
             }
         }
         return itens
+    }
+
+    /// Monta a composição que gira, enquadra e escala cada quadro para w×h.
+    /// "Desfocado" usa o Core Image (fundo = o próprio quadro ampliado e desfocado);
+    /// os outros modos só posicionam a camada (mais leve).
+    static func composicao(fonte: AVAsset, trilha: AVAssetTrack, tam: CGSize, transf: CGAffineTransform, duracao: CMTime,
+                           o: OpcoesConversao, w: Int, h: Int, fps: Double, cor: [String: String]) async throws -> AVMutableVideoComposition {
+        let exib = CGRect(origin: .zero, size: tam).applying(transf)
+        let W = max(abs(exib.width), 1), H = max(abs(exib.height), 1)
+        let cw = CGFloat(w), ch = CGFloat(h)
+        let comp: AVMutableVideoComposition
+        if let e = o.enquadramento, e.modo == .desfocar {
+            let orient = orientacao(transf)
+            let giraDeLado = orient == .left || orient == .right
+            comp = try await AVMutableVideoComposition.videoComposition(with: fonte) { req in
+                let ext0 = req.sourceImage.extent
+                // o quadro chega sem a rotação do vídeo; se já vier girado, não gira de novo
+                let jaGirado = giraDeLado && abs(W - H) > 2 && abs(ext0.width - W) < 2 && abs(ext0.height - H) < 2
+                let girado = jaGirado ? req.sourceImage : req.sourceImage.oriented(orient)
+                let src = girado.transformed(by: CGAffineTransform(translationX: -girado.extent.minX, y: -girado.extent.minY))
+                let sw = max(src.extent.width, 1), sh = max(src.extent.height, 1)
+                let tela = CGRect(x: 0, y: 0, width: cw, height: ch)
+                // frente: o vídeo inteiro, centrado
+                let s = min(cw / sw, ch / sh)
+                let frente = src.transformed(by: CGAffineTransform(scaleX: s, y: s))
+                    .transformed(by: CGAffineTransform(translationX: (cw - sw * s) / 2, y: (ch - sh * s) / 2))
+                // fundo: ampliado para cobrir, desfocado em 1/8 do tamanho (leve) e escurecido um pouco
+                let sf = max(cw / sw, ch / sh)
+                let reducao: CGFloat = 8
+                let fundo = src.transformed(by: CGAffineTransform(scaleX: sf / reducao, y: sf / reducao))
+                    .clampedToExtent()
+                    .applyingGaussianBlur(sigma: Double(max(cw, ch) / reducao) * 0.035)
+                    .transformed(by: CGAffineTransform(scaleX: reducao, y: reducao))
+                    .transformed(by: CGAffineTransform(translationX: (cw - sw * sf) / 2, y: (ch - sh * sf) / 2))
+                    .applyingFilter("CIExposureAdjust", parameters: [kCIInputEVKey: -0.7])
+                    .cropped(to: tela)
+                req.finish(with: frente.composited(over: fundo).cropped(to: tela), context: nil)
+            }
+        } else {
+            // posição no espaço do quadro já girado (origem no canto de cima, à esquerda)
+            let pos: CGAffineTransform
+            switch o.enquadramento?.modo {
+            case .preencher?, .livre?:
+                let r = o.enquadramento!.recorte
+                let rx = CGFloat(r.x) * W, ry = CGFloat(r.y) * H
+                let rw = max(1, CGFloat(r.largura) * W), rh = max(1, CGFloat(r.altura) * H)
+                pos = CGAffineTransform(translationX: -rx, y: -ry).concatenating(CGAffineTransform(scaleX: cw / rw, y: ch / rh))
+            case .caber?:
+                let s = min(cw / W, ch / H)
+                pos = CGAffineTransform(scaleX: s, y: s)
+                    .concatenating(CGAffineTransform(translationX: (cw - W * s) / 2, y: (ch - H * s) / 2))
+            default:
+                // escala por eixo: w/h foram arredondados para par, então uma escala única
+                // deixaria sobra/corte de ~1 px numa das bordas
+                pos = CGAffineTransform(scaleX: cw / W, y: ch / H)
+            }
+            let t = transf
+                .concatenating(CGAffineTransform(translationX: -exib.minX, y: -exib.minY))
+                .concatenating(pos)
+            comp = AVMutableVideoComposition()
+            let instr = AVMutableVideoCompositionInstruction()
+            instr.timeRange = CMTimeRange(start: .zero, duration: duracao)
+            let camada = AVMutableVideoCompositionLayerInstruction(assetTrack: trilha)
+            camada.setTransform(t, at: .zero)
+            instr.layerInstructions = [camada]
+            comp.instructions = [instr]
+        }
+        comp.renderSize = CGSize(width: w, height: h)
+        comp.frameDuration = duracaoDoQuadro(fps)
+        comp.colorPrimaries = cor[AVVideoColorPrimariesKey]
+        comp.colorTransferFunction = cor[AVVideoTransferFunctionKey]
+        comp.colorYCbCrMatrix = cor[AVVideoYCbCrMatrixKey]
+        return comp
+    }
+
+    /// Rotação do vídeo (preferredTransform) como orientação de imagem, para o Core Image.
+    static func orientacao(_ t: CGAffineTransform) -> CGImagePropertyOrientation {
+        func q(_ v: CGFloat) -> Int { Int(v.rounded()) }
+        switch (q(t.a), q(t.b), q(t.c), q(t.d)) {
+        case (0, 1, -1, 0): return .right
+        case (0, -1, 1, 0): return .left
+        case (-1, 0, 0, -1): return .down
+        case (-1, 0, 0, 1): return .upMirrored
+        case (1, 0, 0, -1): return .downMirrored
+        default: return .up
+        }
     }
 
     static func duracaoDoQuadro(_ fps: Double) -> CMTime {

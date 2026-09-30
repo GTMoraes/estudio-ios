@@ -3,7 +3,7 @@
 App de iPhone que junta o whisper.frx9.com e o ConversorMidia: baixar links (YouTube, Instagram…),
 transcrever (texto `.txt` + legenda `.srt`) e tratar voz. Liquid Glass, tema escuro, iOS 26+.
 
-## O que roda onde (versão 0.7)
+## O que roda onde (versão 0.8)
 
 | Função | No iPhone | Na nuvem |
 |---|---|---|
@@ -79,6 +79,17 @@ baixar/compilar (modelo de transcrição + compilação no Neural Engine; modelo
 processador; modelos de voz da GPU + preparação na GPU), com o estado de cada um e botões para
 preparar um ou todos. A compilação fica no cache do iOS e é refeita depois de instalar uma versão
 nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
+
+## Enquadramento, GIF e WebP animado (0.8)
+
+- Conversor › Enquadramento (`App/Telas/EnquadramentoView.swift`): preencher (recorte no formato
+  9:16, 4:5, 1:1, 4:3, 16:9, arrastável), caber (barras pretas), desfocado (fundo = o próprio vídeo
+  ampliado e desfocado, via Core Image) e livre (qualquer retângulo). Fixo para o vídeo inteiro.
+  Montagem em `ConversorVideo.composicao` (camada com transformação; Core Image só no desfocado).
+- GIF (ImageIO) e WebP animado (WebPAnimEncoder da libwebpmux, `cod_webpanim_*` em Codificadores.c):
+  `App/Motor/Animacao.swift`. Quadros SDR 8 bits da mesma composição (giro, enquadramento,
+  velocidade, trecho), largura 320–800, 10–24 fps. Resultado vai para a galeria de imagens,
+  que toca a animação.
 
 ## Nome de saída
 

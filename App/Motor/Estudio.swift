@@ -498,13 +498,13 @@ final class Estudio {
 
     func converter(_ arquivo: URL, nome: String, info: InfoMidia, opcoes: OpcoesConversao,
                    padrao: String = Renomear.padrao, data: Date = Date()) {
-        let tipo: Item.Tipo = opcoes.acao == .audio || !info.temVideo ? .audio : .video
-        let dims: (Int, Int)? = tipo != .video ? nil
-            : opcoes.acao == .semRecodificar ? (info.largura, info.altura) : PlanoConversao.dimensoes(info, opcoes)
-        let base = PadraoNome.base(nome, padrao: padrao, data: opcoes.usarDataAtual && tipo == .video ? Date() : data,
+        let tipo: Item.Tipo = opcoes.animado && info.temVideo ? .imagem
+            : opcoes.acao == .audio || !info.temVideo ? .audio : .video
+        let dims: (Int, Int)? = tipo == .audio ? nil : PlanoConversao.dimensoesSaida(info, opcoes)
+        let base = PadraoNome.base(nome, padrao: padrao, data: opcoes.usarDataAtual && tipo != .audio ? Date() : data,
                                   largura: dims?.0, altura: dims?.1)
         let id = novoItem(tipo, nome, nuvem: false, mensagem: "Convertendo no iPhone")
-        if info.temVideo {
+        if info.temVideo && tipo == .video {
             historico.atualizar(id) {
                 $0.origemMidia = OrigemMidia(nome: nome, largura: info.largura, altura: info.altura, bytes: info.tamanhoBytes,
                                              duracao: info.duracao, fps: info.fps, codec: info.codecVideo,

@@ -185,6 +185,8 @@ struct DetalhesImagem {
     var perfil: String?
     var alfa = false
     var gps = false
+    var quadros = 1                 // animação (GIF / WebP animado)
+    var duracao: Double?
 }
 
 struct InfoImagem {
@@ -272,7 +274,32 @@ enum ConversorImagem {
         d.perfil = p[kCGImagePropertyProfileName] as? String
         d.alfa = (p[kCGImagePropertyHasAlpha] as? Bool) ?? false
         d.gps = p[kCGImagePropertyGPSDictionary] != nil
+        d.quadros = CGImageSourceGetCount(src)
+        if d.quadros > 1 { d.duracao = animacao(src)?.duracao }
         return d
+    }
+
+    /// Quadros de uma animação (GIF / WebP animado), já reduzidos para a tela, e a duração total.
+    static func animacao(_ src: CGImageSource, lado: Int? = nil, maxQuadros: Int = 600) -> (quadros: [CGImage], duracao: Double)? {
+        let n = CGImageSourceGetCount(src)
+        guard n > 1 else { return nil }
+        var quadros: [CGImage] = []
+        var total = 0.0
+        for i in 0..<min(n, maxQuadros) {
+            let p = CGImageSourceCopyPropertiesAtIndex(src, i, nil) as? [CFString: Any] ?? [:]
+            let dic = (p[kCGImagePropertyGIFDictionary] ?? p[kCGImagePropertyWebPDictionary]) as? [CFString: Any] ?? [:]
+            var atraso = (dic[kCGImagePropertyGIFUnclampedDelayTime] ?? dic[kCGImagePropertyWebPUnclampedDelayTime]) as? Double ?? 0
+            if atraso <= 0.001 { atraso = (dic[kCGImagePropertyGIFDelayTime] ?? dic[kCGImagePropertyWebPDelayTime]) as? Double ?? 0.1 }
+            total += max(0.02, atraso)
+            if let lado {
+                if let img = CGImageSourceCreateThumbnailAtIndex(src, i, [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceThumbnailMaxPixelSize: lado,
+                ] as CFDictionary) { quadros.append(img) }
+            }
+        }
+        return (quadros, total)
     }
 
     /// Nome curto do formato a partir do UTI ("public.heic" -> "HEIC").

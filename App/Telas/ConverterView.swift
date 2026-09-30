@@ -18,6 +18,7 @@ struct PainelConverter: View {
     @State private var meus = MeusPresets.shared
     @State private var padrao = PadraoNome.ler(.conversao)
     @State private var dataOriginal = Date()
+    @State private var editandoEnquadramento = false
 
     private let personalizado = "p:" + PresetConversao.personalizado.rawValue
 
@@ -75,7 +76,7 @@ struct PainelConverter: View {
 
     private func previaNome(_ info: InfoMidia) -> String {
         let v = saiVideo(info)
-        let dims: (Int, Int) = o.acao == .semRecodificar ? (info.largura, info.altura) : PlanoConversao.dimensoes(info, o)
+        let dims: (Int, Int) = PlanoConversao.dimensoesSaida(info, o)
         let data: Date = v && o.usarDataAtual ? Date() : dataOriginal
         let b = PadraoNome.base(nome, padrao: padrao, data: data, largura: v ? dims.0 : nil, altura: v ? dims.1 : nil)
         return b + "." + extensaoSaida
@@ -94,6 +95,8 @@ struct PainelConverter: View {
         case .video: return "mp4"
         case .semRecodificar: return arquivo.pathExtension.lowercased() == "mp4" ? "mp4" : "mov"
         case .audio: return o.formatoAudio.rawValue
+        case .gif: return "gif"
+        case .webpAnimado: return "webp"
         }
     }
 
@@ -157,11 +160,13 @@ struct PainelConverter: View {
         if info.temVideo && presetEmbutido == .personalizado {
             Cartao(titulo: "Ação", icone: "arrow.triangle.2.circlepath") {
                 Picker("Ação", selection: $o.acao) {
-                    Text("Recodificar").tag(OpcoesConversao.Acao.video)
+                    Text("Recodificar o vídeo").tag(OpcoesConversao.Acao.video)
                     Text("Sem recodificar").tag(OpcoesConversao.Acao.semRecodificar)
                     Text("Só o áudio").tag(OpcoesConversao.Acao.audio)
+                    Text("GIF").tag(OpcoesConversao.Acao.gif)
+                    Text("WebP animado").tag(OpcoesConversao.Acao.webpAnimado)
                 }
-                .pickerStyle(.segmented)
+                .pickerStyle(.menu)
             }
         }
 
@@ -169,13 +174,16 @@ struct PainelConverter: View {
         case .video: ajustesVideo(info)
         case .audio: ajustesAudio(info)
         case .semRecodificar: EmptyView()
+        case .gif, .webpAnimado: ajustesAnimado(info)
         }
+
+        if o.refazQuadros && info.temVideo { cartaoEnquadramento(info) }
 
         if o.acao != .semRecodificar { velocidade(info) }
 
         PainelTrecho(arquivo: arquivo, info: info, inicio: $o.inicio, fim: $o.fim)
 
-        if saiVideo(info) {
+        if saiVideo(info) && !o.animado {
             Cartao(titulo: "Data e local", icone: "calendar") {
                 Picker("Data", selection: $o.usarDataAtual) {
                     Text("Manter a do vídeo").tag(false)
@@ -199,6 +207,14 @@ struct PainelConverter: View {
                     Spacer()
                     Text("\(dims.0)×\(dims.1) · \(String(format: "%.1f", PlanoConversao.taxaVideo(info, o) / 1_000_000)) Mb/s")
                         .monospacedDigit().foregroundStyle(Tema.texto2)
+                }
+            } else if o.animado {
+                let dims = PlanoConversao.dimensoesAnimado(info, o)
+                let quadros = Int((PlanoConversao.duracao(info, o) * Double(o.fpsAnimado)).rounded())
+                HStack {
+                    Label("Resultado", systemImage: "rectangle.dashed")
+                    Spacer()
+                    Text("\(dims.0)×\(dims.1) · \(quadros) quadros").monospacedDigit().foregroundStyle(Tema.texto2)
                 }
             }
             HStack {
@@ -234,10 +250,6 @@ struct PainelConverter: View {
                 Text("H.264").tag(OpcoesConversao.Codec.h264)
             }
             .pickerStyle(.segmented)
-            Label {
-                Text("**AV1** — em breve, pela nuvem. Nem o iPhone nem a placa da nuvem codificam AV1 por hardware, então não será rápido em lugar nenhum; mas é um ótimo formato (arquivo bem menor na mesma qualidade).")
-            } icon: { Image(systemName: "hourglass") }
-            .font(.footnote).foregroundStyle(Tema.texto2)
 
             // cor: sempre visível
             VStack(alignment: .leading, spacing: 6) {
@@ -405,6 +417,69 @@ struct PainelConverter: View {
         }
     }
 
+    // MARK: GIF / WebP animado
+
+    @ViewBuilder private func ajustesAnimado(_ info: InfoMidia) -> some View {
+        Cartao(titulo: o.acao == .gif ? "GIF" : "WebP animado", icone: "photo.stack") {
+            Picker("Largura", selection: ajuste(\.larguraAnimada)) {
+                Text("320 px").tag(320)
+                Text("480 px").tag(480)
+                Text("640 px").tag(640)
+                Text("800 px").tag(800)
+            }
+            .pickerStyle(.segmented)
+            Picker("Quadros por segundo", selection: ajuste(\.fpsAnimado)) {
+                Text("10 fps").tag(10)
+                Text("15 fps").tag(15)
+                Text("20 fps").tag(20)
+                Text("24 fps").tag(24)
+            }
+            .pickerStyle(.segmented)
+            Toggle("Repetir sem parar", isOn: ajuste(\.repetirAnimado))
+            if o.acao == .webpAnimado {
+                HStack {
+                    Text("Qualidade")
+                    Slider(value: ajuste(\.qualidadeAnimada), in: 40...95, step: 5)
+                    Text("\(Int(o.qualidadeAnimada))").monospacedDigit().frame(width: 30, alignment: .trailing)
+                }
+            }
+            Text("A largura nunca passa a do vídeo (ou do recorte). Mais largura e mais fps = arquivo maior.")
+                .font(.footnote).foregroundStyle(Tema.texto2)
+        }
+    }
+
+    // MARK: enquadramento
+
+    @ViewBuilder private func cartaoEnquadramento(_ info: InfoMidia) -> some View {
+        Cartao(titulo: "Enquadramento", icone: "crop") {
+            Text(descricaoEnquadramento(info)).font(.subheadline)
+            HStack {
+                Button { editandoEnquadramento = true } label: { Label("Ajustar…", systemImage: "crop") }
+                    .buttonStyle(.glass)
+                if o.enquadramento != nil {
+                    Button("Tirar", role: .destructive) { o.enquadramento = nil }.buttonStyle(.glass)
+                }
+            }
+            Text("Recortar num formato (9:16, 4:5, 1:1…), caber com barras pretas ou fundo desfocado, ou um retângulo livre.")
+                .font(.footnote).foregroundStyle(Tema.texto2)
+        }
+        .sheet(isPresented: $editandoEnquadramento) {
+            EditorEnquadramento(arquivo: arquivo, info: info, enquadramento: $o.enquadramento)
+        }
+    }
+
+    private func descricaoEnquadramento(_ info: InfoMidia) -> String {
+        guard let e = o.enquadramento else { return "Como o original." }
+        let d = PlanoConversao.dimensoesSaida(info, o)
+        let prop = Enquadramento.proporcoes.first { abs($0.valor - e.proporcao) < 0.001 }?.nome ?? ""
+        switch e.modo {
+        case .livre: return "Recorte livre · \(d.0)×\(d.1)"
+        case .preencher: return "Preencher \(prop) · \(d.0)×\(d.1)"
+        case .caber: return "Caber \(prop) com barras pretas · \(d.0)×\(d.1)"
+        case .desfocar: return "Caber \(prop) com fundo desfocado · \(d.0)×\(d.1)"
+        }
+    }
+
     // MARK: avisos
 
     @ViewBuilder private func avisos(_ info: InfoMidia) -> some View {
@@ -425,6 +500,21 @@ struct PainelConverter: View {
         if o.acao == .semRecodificar {
             Label("Sem recodificar, o corte cai no keyframe mais próximo (pode começar um pouco antes).", systemImage: "info.circle")
                 .font(.footnote).foregroundStyle(Tema.texto2)
+        }
+        if o.animado {
+            if PlanoConversao.duracao(info, o) > 15.5 {
+                Label("Animação longa: arquivo grande e demorado para gerar. O ideal é até 15 s (use o Trecho).",
+                      systemImage: "exclamationmark.triangle").font(.footnote).foregroundStyle(.yellow)
+            }
+            if info.hdr != .sdr {
+                Label("O HDR vira SDR (a animação é 8 bits).", systemImage: "sun.max.trianglebadge.exclamationmark")
+                    .font(.footnote).foregroundStyle(.yellow)
+            }
+            if o.acao == .gif {
+                Label("GIF: no máximo 256 cores por quadro; degradês e pele podem ficar com faixas. O WebP animado não tem esse limite.",
+                      systemImage: "info.circle").font(.footnote).foregroundStyle(Tema.texto2)
+            }
+            Label("Sem som; tamanho estimado aproximado.", systemImage: "speaker.slash").font(.footnote).foregroundStyle(Tema.texto2)
         }
     }
 }
