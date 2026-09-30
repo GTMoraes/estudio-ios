@@ -204,7 +204,7 @@ struct PainelArquivo: View {
                 }
                 Text(naNuvem ? "Envia para a sua nuvem e recebe os MP3 aqui (a opção Quadra ainda não existe na nuvem)."
                              : ModelosVoz.prontos ? "Roda no iPhone, sem internet. Deixe o app aberto até terminar."
-                             : "Roda no iPhone. A 1ª vez baixa os modelos de voz (290 MB, uma vez só).")
+                             : "Roda no iPhone. A 1ª vez baixa e prepara os modelos de voz (580 MB, uma vez só).")
                     .font(.footnote).foregroundStyle(Tema.texto2)
                 BotaoPrincipal(titulo: "Tratar voz", icone: "wand.and.stars") {
                     estudio.tratarVoz(arquivo, nome: nome, opcoes: voz, quadra: quadra && !naNuvem, naNuvem: naNuvem); fechar()

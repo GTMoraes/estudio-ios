@@ -293,8 +293,9 @@ enum VozLocal {
         op.bloco_seg = blocoSegundos
 
         let nomesEtapa = ["Lendo o áudio", "Separando voz e trilha", "Tirando o eco", "Montando os arquivos"]
-        // onde rodar os modelos: "cpu" (padrão, igual à nuvem), "gpu" (Core ML, float32) ou "ane" (Neural Engine)
-        let acel = UserDefaults.standard.string(forKey: "vozAcelerador") ?? "cpu"
+        // onde rodar os modelos: "gpu" (padrão: Core ML em float32, conferido com o processador)
+        // ou "cpu" (ONNX Runtime). O Neural Engine saiu: derrubava o app e calcula com menos precisão.
+        let acel = UserDefaults.standard.string(forKey: "vozAcelerador") == "cpu" ? "cpu" : "gpu"
         if acel == "gpu" && !ModelosCoreML.prontos {
             Diagnostico.log("preparando os modelos da GPU")
             try await ModelosCoreML.preparar(progresso: progresso)

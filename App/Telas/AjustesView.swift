@@ -14,7 +14,7 @@ struct AjustesView: View {
     @State private var baixando: Double?
     @State private var msgModelo: String?
     @State private var espaco: Int64 = 0
-    @AppStorage("vozAcelerador") private var vozAcelerador = "cpu"
+    @AppStorage("vozAcelerador") private var vozAcelerador = "gpu"
     @State private var baixandoVoz: Double?
     @State private var msgVoz: String?
     @State private var espacoVoz: Int64 = 0
@@ -145,7 +145,7 @@ struct AjustesView: View {
     @ViewBuilder private var vozCartao: some View {
         Cartao(titulo: "Tratar voz no iPhone", icone: "waveform") {
             let pronto = espacoVoz > 0 && ModelosVoz.prontos
-            Label(pronto ? "Modelos de voz baixados" : "Modelos de voz ainda não baixados (290 MB)",
+            Label(pronto ? "Modelos de voz baixados" : "Modelos de voz ainda não baixados (290 MB + 290 MB da GPU)",
                   systemImage: pronto ? "checkmark.circle.fill" : "arrow.down.circle")
                 .foregroundStyle(pronto ? .green : Tema.texto2)
             if let baixandoVoz { ProgressView(value: baixandoVoz).tint(Tema.acento) }
@@ -165,17 +165,15 @@ struct AjustesView: View {
                     }
                 }
             }
-            Picker("Onde rodar os modelos", selection: $vozAcelerador) {
-                Text("Processador").tag("cpu")
+            Picker("Onde rodar os modelos", selection: Binding(get: { vozAcelerador == "cpu" ? "cpu" : "gpu" },
+                                                                set: { vozAcelerador = $0 })) {
                 Text("GPU (Core ML)").tag("gpu")
-                Text("Neural Engine (experimental)").tag("ane")
+                Text("Processador").tag("cpu")
             }
             .pickerStyle(.menu)
-            Text(vozAcelerador == "gpu"
-                 ? "GPU: mesmos cálculos em precisão total, deve ser mais rápido. Na 1ª vez baixa mais 290 MB e prepara os modelos. A cada tratamento, o 1º trecho é conferido com o processador; se não bater, volta para o processador sozinho."
-                 : vozAcelerador == "ane"
-                 ? "Neural Engine: pode ser o mais rápido, mas calcula com menos precisão e o resultado pode mudar um pouco. Se derrubar o app, volta para o processador sozinho."
-                 : "Processador: resultado igual ao da nuvem.")
+            Text(vozAcelerador == "cpu"
+                 ? "Processador: o caminho mais lento (cerca de 3× a duração do áudio)."
+                 : "GPU: bem mais rápido, com os mesmos cálculos em precisão total. Na 1ª vez baixa mais 290 MB e prepara os modelos. Em cada tratamento o 1º trecho é conferido com o processador; se não bater, volta para o processador sozinho.")
                 .font(.footnote).foregroundStyle(Tema.texto2)
             if let diag = try? String(contentsOf: Diagnostico.arquivo, encoding: .utf8), !diag.isEmpty {
                 DisclosureGroup("Diagnóstico do último tratamento") {

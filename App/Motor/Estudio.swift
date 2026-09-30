@@ -326,7 +326,7 @@ final class Estudio {
     /// acompanhamento. Os do iPhone foram interrompidos junto com o app.
     func retomar() {
         if VozLocal.neuralDerrubouOApp() {
-            aviso = "O Neural Engine fechou o app no último tratamento de voz e foi desligado. O tratamento volta a rodar no processador (mesmo resultado da nuvem)."
+            aviso = "A GPU fechou o app no último tratamento de voz e foi desligada (Ajustes › Tratar voz no iPhone). O tratamento volta a rodar no processador, com o mesmo resultado, só que mais devagar."
         }
         for i in historico.itens where i.estado == .processando && tarefas[i.id] == nil {
             if i.naNuvem, let job = i.trabalho {
