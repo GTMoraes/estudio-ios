@@ -50,6 +50,16 @@ nada muda no servidor. A senha fica no Keychain do iPhone para renovar a sessão
 - Resultado: grade de miniaturas; tocar abre em tela cheia (pinça/toque duplo para zoom) com as
   informações e a comparação com o original (formato, resolução, tamanho), guardadas no histórico.
 
+## Resultado de vídeo
+
+- Grade de miniaturas; tocar abre em tela cheia com player e informações comparadas com o
+  original (formato, resolução, fps, taxa, tamanho, ambiente do HDR), guardadas no histórico.
+- Data: manter a do vídeo original ou usar agora; aparelho (marca/modelo) sempre copiado;
+  localização só se pedida.
+- HDR do iPhone: a caixa `amve` (ambiente de visualização, luz em que foi gravado) é copiada
+  do original para o codificador. Sem ela o iOS mostra o HLG com brilho diferente. O Dolby
+  Vision (RPU) é refeito pelo codificador a partir dos quadros: valores próximos, não idênticos.
+
 ## Nome de saída
 
 Todos os trabalhos têm o cartão "Nome de saída" (`App/Telas/NomeSaidaView.swift`,

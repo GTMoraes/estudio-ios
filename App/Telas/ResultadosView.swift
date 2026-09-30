@@ -112,7 +112,7 @@ struct DetalheView: View {
                         }
                     }
 
-                    if item.estado == .pronto, item.tipo == .imagem {
+                    if item.estado == .pronto, item.tipo == .imagem || item.tipo == .video {
                         Cartao {
                             if let r = item.resumo, !r.isEmpty {
                                 Label(r, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(.yellow)
@@ -127,6 +127,10 @@ struct DetalheView: View {
                     if item.estado == .pronto, item.tipo == .imagem {
                         Cartao(titulo: item.arquivos.count == 1 ? "Imagem" : "\(item.arquivos.count) imagens", icone: "photo.on.rectangle") {
                             GradeImagens(item: item)
+                        }
+                    } else if item.estado == .pronto, item.tipo == .video {
+                        Cartao(titulo: item.arquivos.count == 1 ? "Vídeo" : "\(item.arquivos.count) vídeos", icone: "film.stack") {
+                            GradeVideos(item: item)
                         }
                     } else if item.estado == .pronto {
                         Cartao(titulo: "Arquivos", icone: "folder.fill") {
@@ -173,16 +177,21 @@ struct DetalheView: View {
 
     private func salvarTodasNoFotos(_ item: Item) {
         let urls = item.arquivos.map { item.url($0) }
+        let video = item.tipo == .video
+        let (um, varios) = video ? ("Vídeo salvo no Fotos.", "vídeos salvos no Fotos.") : ("Imagem salva no Fotos.", "imagens salvas no Fotos.")
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { st in
             guard st == .authorized || st == .limited else {
                 Task { @MainActor in aviso = "Sem permissão para salvar no Fotos (Ajustes › Privacidade › Fotos)." }
                 return
             }
             PHPhotoLibrary.shared().performChanges({
-                for u in urls { PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: u) }
+                for u in urls {
+                    if video { PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: u) }
+                    else { PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: u) }
+                }
             }) { ok, erro in
                 Task { @MainActor in
-                    aviso = ok ? (urls.count == 1 ? "Imagem salva no Fotos." : "\(urls.count) imagens salvas no Fotos.")
+                    aviso = ok ? (urls.count == 1 ? um : "\(urls.count) " + varios)
                                : "Não consegui salvar: \(erro?.localizedDescription ?? "formato não aceito pelo Fotos")"
                 }
             }

@@ -131,6 +131,11 @@ struct OpcoesConversao: Codable, Equatable {
     var wavTaxa = 0                  // 0 = original
     var inicio: Double?
     var fim: Double?
+    /// opcionais para os presets já gravados continuarem abrindo
+    var dataAgora: Bool?             // true = data da conversão; nil/false = data do vídeo original
+    var manterLocal: Bool?           // true = copia a localização (GPS) do original
+    var usarDataAtual: Bool { get { dataAgora ?? false } set { dataAgora = newValue } }
+    var manterLocalizacao: Bool { get { manterLocal ?? false } set { manterLocal = newValue } }
 
     var extensaoVideo: String { acao == .semRecodificar ? "" : "mp4" }
 }
@@ -327,6 +332,7 @@ enum ConversorVideo {
         let destino = Nuvem.semColisao(pasta.appendingPathComponent("\(base).\(ext)"))
         exp.timeRange = intervalo(info, o)
         exp.shouldOptimizeForNetworkUse = true
+        exp.metadata = await Self.metadadosSaida(asset, o: o)
         let acompanhar = Task {
             for await estado in exp.states(updateInterval: 0.5) {
                 if case .exporting(let p) = estado { progresso(p.fractionCompleted) }
@@ -408,9 +414,18 @@ enum ConversorVideo {
         let destino = Nuvem.semColisao(pasta.appendingPathComponent("\(base).mp4"))
         let writer = try AVAssetWriter(outputURL: destino, fileType: .mp4)
         writer.shouldOptimizeForNetworkUse = true
+        writer.metadata = await Self.metadadosSaida(asset, o: o)
+
+        // "ambiente de visualização" do HDR do iPhone (caixa amve): diz ao player em que luz
+        // o vídeo foi gravado. Sem ele o iOS mostra o HLG com outro brilho. Copiado do original.
+        var ambiente: Data?
+        if hdr, let fd = try await vtrack.load(.formatDescriptions).first {
+            ambiente = CMFormatDescriptionGetExtension(fd, extensionKey: Self.chaveAmbiente as CFString) as? Data
+        }
 
         let vIn = AVAssetWriterInput(mediaType: .video,
-                                     outputSettings: try ajustesVideo(writer, o: o, info: info, w: w, h: h, fps: fps, taxa: taxa, hdr: hdr, cor: cor))
+                                     outputSettings: try ajustesVideo(writer, o: o, info: info, w: w, h: h, fps: fps, taxa: taxa,
+                                                                      hdr: hdr, cor: cor, ambiente: ambiente))
         vIn.expectsMediaDataInRealTime = false
         writer.add(vIn)
 
@@ -456,6 +471,37 @@ enum ConversorVideo {
         return destino
     }
 
+    /// Metadados do arquivo de saída: data (a do original ou a de agora), aparelho e, se pedido, localização.
+    static func metadadosSaida(_ asset: AVAsset, o: OpcoesConversao) async -> [AVMetadataItem] {
+        let fonte = (try? await asset.load(.metadata)) ?? []
+        var itens: [AVMetadataItem] = []
+        var manter: Set<AVMetadataIdentifier> = [.quickTimeMetadataMake, .quickTimeMetadataModel, .quickTimeMetadataSoftware]
+        if o.manterLocalizacao { manter.insert(.quickTimeMetadataLocationISO6709) }
+        for it in fonte {
+            if let id = it.identifier, manter.contains(id) { itens.append(it) }
+        }
+        var data: Date?
+        if o.usarDataAtual {
+            data = Date()
+        } else if let d = try? await asset.load(.creationDate), let v = try? await d.load(.dateValue) {
+            data = v
+        }
+        if let data {
+            let f = ISO8601DateFormatter()
+            f.formatOptions = [.withInternetDateTime]
+            f.timeZone = .current
+            let texto = f.string(from: data)
+            for id in [AVMetadataIdentifier.quickTimeMetadataCreationDate, .commonIdentifierCreationDate] {
+                let m = AVMutableMetadataItem()
+                m.identifier = id
+                m.value = texto as NSString
+                m.dataType = kCMMetadataBaseDataType_UTF8 as String
+                itens.append(m)
+            }
+        }
+        return itens
+    }
+
     static func duracaoDoQuadro(_ fps: Double) -> CMTime {
         for (alvo, num, den) in [(23.976, 1001, 24000), (29.97, 1001, 30000), (59.94, 1001, 60000)] where abs(fps - alvo) < 0.02 {
             return CMTime(value: CMTimeValue(num), timescale: CMTimeScale(den))
@@ -477,8 +523,11 @@ enum ConversorVideo {
 
     /// Monta os ajustes do codificador e confere com o AVAssetWriter antes de usar
     /// (ajuste não suportado derrubaria o app). Vai tirando os opcionais até servir.
+    /// Mesmo texto da chave no CoreMedia (extensão do formato) e no VideoToolbox (propriedade do codificador).
+    static let chaveAmbiente = "AmbientViewingEnvironment"
+
     static func ajustesVideo(_ writer: AVAssetWriter, o: OpcoesConversao, info: InfoMidia, w: Int, h: Int,
-                             fps: Double, taxa: Double, hdr: Bool, cor: [String: String]) throws -> [String: Any] {
+                             fps: Double, taxa: Double, hdr: Bool, cor: [String: String], ambiente: Data? = nil) throws -> [String: Any] {
         var comp: [String: Any] = [
             AVVideoAverageBitRateKey: Int(taxa),
             AVVideoExpectedSourceFrameRateKey: Int(fps.rounded()),
@@ -500,7 +549,13 @@ enum ConversorVideo {
         }
         // (o Dolby Vision não é pedido: a composição refaz os quadros e os metadados dele não
         // sobrevivem; uma chave que o codificador não aceite derrubaria o app)
-        var tentativas: [[String: Any]] = [comp]
+        var tentativas: [[String: Any]] = []
+        if let ambiente {
+            var c = comp
+            c[chaveAmbiente] = ambiente
+            tentativas.append(c)
+        }
+        tentativas.append(comp)
         var basico = comp
         [AVVideoMaxKeyFrameIntervalDurationKey, AVVideoExpectedSourceFrameRateKey, AVVideoH264EntropyModeKey].forEach { basico.removeValue(forKey: $0) }
         tentativas.append(basico)

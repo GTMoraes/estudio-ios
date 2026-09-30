@@ -301,11 +301,20 @@ final class Estudio {
         let tipo: Item.Tipo = opcoes.acao == .audio || !info.temVideo ? .audio : .video
         let dims: (Int, Int)? = tipo != .video ? nil
             : opcoes.acao == .semRecodificar ? (info.largura, info.altura) : PlanoConversao.dimensoes(info, opcoes)
-        let base = PadraoNome.base(nome, padrao: padrao, data: data, largura: dims?.0, altura: dims?.1)
+        let base = PadraoNome.base(nome, padrao: padrao, data: opcoes.usarDataAtual && tipo == .video ? Date() : data,
+                                  largura: dims?.0, altura: dims?.1)
         let id = novoItem(tipo, nome, nuvem: false, mensagem: "Convertendo no iPhone")
         let inicio = Date()
         rodar(id) {
             guard let item = self.historico.item(id) else { return }
+            if info.temVideo {
+                let lux = await DetalhesVideo.ambienteLux(arquivo)
+                self.historico.atualizar(id) {
+                    $0.origemMidia = OrigemMidia(nome: nome, largura: info.largura, altura: info.altura, bytes: info.tamanhoBytes,
+                                                 duracao: info.duracao, fps: info.fps, codec: info.codecVideo,
+                                                 hdr: info.hdr.rawValue, dolbyVision: info.dolbyVision, ambienteLux: lux, data: data)
+                }
+            }
             let saida = try await ConversorVideo.converter(arquivo, info: info, opcoes: opcoes, pasta: item.pasta,
                                                            base: base) { p in
                 Task { @MainActor in self.etapa(id, "Convertendo no iPhone", p) }

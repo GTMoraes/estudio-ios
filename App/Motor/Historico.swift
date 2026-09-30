@@ -21,6 +21,7 @@ struct Item: Codable, Identifiable, Equatable {
     var duracaoProcesso: Double?
     var baseSaida: String?            // nome de saída escolhido (padrão de nome), para retomar da nuvem
     var origens: [String: OrigemImagem]?   // imagens: arquivo convertido -> como era o original
+    var origemMidia: OrigemMidia?          // conversão de vídeo: como era o original
 
     var pasta: URL { Historico.pastaResultados.appendingPathComponent(id.uuidString, isDirectory: true) }
     func url(_ nome: String) -> URL { pasta.appendingPathComponent(nome) }
@@ -43,6 +44,21 @@ struct OrigemImagem: Codable, Equatable {
     var altura: Int
     var bytes: Int64
     var tipo: String?
+    var data: Date?
+}
+
+/// Como era o vídeo original (para comparar na tela de detalhes; o original é apagado).
+struct OrigemMidia: Codable, Equatable {
+    var nome: String
+    var largura: Int
+    var altura: Int
+    var bytes: Int64
+    var duracao: Double
+    var fps: Double
+    var codec: String
+    var hdr: String
+    var dolbyVision: Bool
+    var ambienteLux: Double?
     var data: Date?
 }
 

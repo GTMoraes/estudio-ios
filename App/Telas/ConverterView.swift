@@ -67,6 +67,28 @@ struct PainelConverter: View {
         Binding(get: { o[keyPath: kp] }, set: { o[keyPath: kp] = $0; selecao = personalizado })
     }
 
+    private func saiVideo(_ info: InfoMidia) -> Bool { o.acao != .audio && info.temVideo }
+
+    private func tokensNome(_ info: InfoMidia) -> [String] {
+        saiVideo(info) ? ["{nome}", "{data}", "{datahora}", "{largura}", "{altura}"] : ["{nome}", "{data}", "{datahora}"]
+    }
+
+    private func previaNome(_ info: InfoMidia) -> String {
+        let v = saiVideo(info)
+        let dims: (Int, Int) = o.acao == .semRecodificar ? (info.largura, info.altura) : PlanoConversao.dimensoes(info, o)
+        let data: Date = v && o.usarDataAtual ? Date() : dataOriginal
+        let b = PadraoNome.base(nome, padrao: padrao, data: data, largura: v ? dims.0 : nil, altura: v ? dims.1 : nil)
+        return b + "." + extensaoSaida
+    }
+
+    private func notaNome(_ info: InfoMidia) -> String {
+        let v = saiVideo(info)
+        var t = v && o.usarDataAtual ? "{data} e {datahora} = agora (opção de data acima)."
+                                     : "{data} e {datahora} = quando o vídeo/áudio foi gravado (se o arquivo não disser, a data do arquivo)."
+        if v { t += " {largura} e {altura} = tamanho do resultado." }
+        return t
+    }
+
     private var extensaoSaida: String {
         switch o.acao {
         case .video: return "mp4"
@@ -153,15 +175,20 @@ struct PainelConverter: View {
 
         PainelTrecho(arquivo: arquivo, info: info, inicio: $o.inicio, fim: $o.fim)
 
-        let ehVideo = o.acao != .audio && info.temVideo
-        let dimsSaida = o.acao == .semRecodificar ? (info.largura, info.altura) : PlanoConversao.dimensoes(info, o)
-        CartaoNomeSaida(padrao: $padrao,
-                        tokens: ehVideo ? ["{nome}", "{data}", "{datahora}", "{largura}", "{altura}"] : ["{nome}", "{data}", "{datahora}"],
-                        previa: [PadraoNome.base(nome, padrao: padrao, data: dataOriginal,
-                                                 largura: ehVideo ? dimsSaida.0 : nil, altura: ehVideo ? dimsSaida.1 : nil)
-                                 + "." + extensaoSaida],
-                        nota: "{data} e {datahora} = quando o vídeo/áudio foi gravado (se o arquivo não disser, a data do arquivo)."
-                              + (ehVideo ? " {largura} e {altura} = tamanho do resultado." : ""))
+        if saiVideo(info) {
+            Cartao(titulo: "Data e local", icone: "calendar") {
+                Picker("Data", selection: $o.usarDataAtual) {
+                    Text("Manter a do vídeo").tag(false)
+                    Text("Usar agora").tag(true)
+                }
+                .pickerStyle(.segmented)
+                Text(o.usarDataAtual ? "Grava a data e hora da conversão: no Fotos, o vídeo aparece como novo."
+                                     : "Mantém a data em que o vídeo foi gravado: no Fotos, ele vai para o dia original.")
+                    .font(.footnote).foregroundStyle(Tema.texto2)
+                Toggle("Manter a localização (GPS)", isOn: $o.manterLocalizacao)
+            }
+        }
+        CartaoNomeSaida(padrao: $padrao, tokens: tokensNome(info), previa: [previaNome(info)], nota: notaNome(info))
 
         Cartao {
             avisos(info)
