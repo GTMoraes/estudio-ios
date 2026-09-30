@@ -112,6 +112,18 @@ struct DetalheView: View {
                         }
                     }
 
+                    if item.estado == .pronto, item.tipo == .imagem {
+                        Cartao {
+                            if let r = item.resumo, !r.isEmpty {
+                                Label(r, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(.yellow)
+                            }
+                            Button { salvarTodasNoFotos(item) } label: {
+                                Label(item.arquivos.count == 1 ? "Salvar no Fotos" : "Salvar as \(item.arquivos.count) no Fotos",
+                                      systemImage: "photo.badge.plus").frame(maxWidth: .infinity).padding(.vertical, 4)
+                            }
+                            .buttonStyle(.glassProminent)
+                        }
+                    }
                     if item.estado == .pronto {
                         Cartao(titulo: "Arquivos", icone: "folder.fill") {
                             ForEach(item.arquivos, id: \.self) { nome in
@@ -155,12 +167,31 @@ struct DetalheView: View {
         }
     }
 
+    private func salvarTodasNoFotos(_ item: Item) {
+        let urls = item.arquivos.map { item.url($0) }
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { st in
+            guard st == .authorized || st == .limited else {
+                Task { @MainActor in aviso = "Sem permissão para salvar no Fotos (Ajustes › Privacidade › Fotos)." }
+                return
+            }
+            PHPhotoLibrary.shared().performChanges({
+                for u in urls { PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: u) }
+            }) { ok, erro in
+                Task { @MainActor in
+                    aviso = ok ? (urls.count == 1 ? "Imagem salva no Fotos." : "\(urls.count) imagens salvas no Fotos.")
+                               : "Não consegui salvar: \(erro?.localizedDescription ?? "formato não aceito pelo Fotos")"
+                }
+            }
+        }
+    }
+
     private func tituloTipo(_ t: Item.Tipo) -> String {
         switch t {
         case .transcricao: return "Transcrição"
         case .voz: return "Voz tratada"
         case .video: return "Vídeo"
         case .audio: return "Áudio"
+        case .imagem: return "Imagens"
         }
     }
 }
@@ -180,12 +211,19 @@ struct LinhaArquivo: View {
     private var ext: String { url.pathExtension.lowercased() }
     private var ehVideo: Bool { ["mp4", "mov", "m4v", "webm", "mkv"].contains(ext) }
     private var ehAudio: Bool { ["mp3", "m4a", "wav", "aac", "flac"].contains(ext) }
+    private var ehFoto: Bool { ["jpg", "jpeg", "png", "heic", "webp", "avif", "tif", "tiff"].contains(ext) }
+    @State private var miniatura: UIImage?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                Image(systemName: ehVideo ? "film" : ehAudio ? "music.note" : "doc.text")
-                    .foregroundStyle(Tema.acento)
+                if ehFoto, let m = miniatura {
+                    Image(uiImage: m).resizable().scaledToFill().frame(width: 44, height: 44)
+                        .clipShape(.rect(cornerRadius: 8))
+                } else {
+                    Image(systemName: ehVideo ? "film" : ehAudio ? "music.note" : ehFoto ? "photo" : "doc.text")
+                        .foregroundStyle(Tema.acento)
+                }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(url.lastPathComponent).font(.subheadline).lineLimit(2)
                     if let t = tamanho { Text(t).font(.caption).foregroundStyle(Tema.texto2) }
@@ -228,6 +266,9 @@ struct LinhaArquivo: View {
             }
         }
         .onDisappear { player?.pause(); video?.pause(); tocando = false }
+        .task {
+            if ehFoto, miniatura == nil, let cg = ConversorImagem.miniatura(url, lado: 160) { miniatura = UIImage(cgImage: cg) }
+        }
         .onReceive(relogio) { _ in
             guard let p = player, !arrastando else { return }
             let t = p.currentTime().seconds

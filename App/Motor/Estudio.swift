@@ -1,18 +1,26 @@
 import Foundation
 import Observation
 import UIKit
+import UniformTypeIdentifiers
 
 /// O que chegou para ser processado (compartilhar, "Abrir com", colar link, escolher arquivo).
 enum Entrada: Identifiable, Equatable {
     case link(String)
     case arquivo(URL, nome: String)
+    case imagens([URL])
 
     var id: String {
         switch self {
         case .link(let l): return "link:" + l
         case .arquivo(let u, _): return "arq:" + u.path
+        case .imagens(let us): return "img:\(us.count):" + (us.first?.path ?? "")
         }
     }
+}
+
+/// Arquivo de imagem? (pela extensão; HEIC, JPG, PNG, WebP, AVIF, TIFF…)
+func ehImagem(_ url: URL) -> Bool {
+    UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) ?? false
 }
 
 /// Estado do app e quem executa os trabalhos (no iPhone ou na nuvem).
@@ -59,6 +67,7 @@ final class Estudio {
 
     /// Lê o que a extensão de compartilhar deixou na caixa.
     func lerCaixa() {
+        var imagens: [URL] = []
         for r in Caixa.pendentes() {
             switch r.tipo {
             case .link:
@@ -67,12 +76,14 @@ final class Estudio {
                 if let origem = Caixa.url(doArquivo: r) {
                     let destino = Nuvem.semColisao(Self.pastaRecebidos.appendingPathComponent(r.nome))
                     if (try? FileManager.default.moveItem(at: origem, to: destino)) != nil {
-                        receber(.arquivo(destino, nome: r.nome))
+                        if ehImagem(destino) { imagens.append(destino) }      // várias fotos viram um lote só
+                        else { receber(.arquivo(destino, nome: r.nome)) }
                     }
                 }
             }
             Caixa.remover(r)
         }
+        if !imagens.isEmpty { receber(.imagens(imagens)) }
     }
 
     /// estudio://caixa (vindo da extensão) ou arquivo aberto com "Abrir com".
@@ -83,7 +94,7 @@ final class Estudio {
         defer { if acesso { url.stopAccessingSecurityScopedResource() } }
         let destino = Nuvem.semColisao(Self.pastaRecebidos.appendingPathComponent(url.lastPathComponent))
         if (try? FileManager.default.copyItem(at: url, to: destino)) != nil {
-            receber(.arquivo(destino, nome: url.lastPathComponent))
+            receber(ehImagem(destino) ? .imagens([destino]) : .arquivo(destino, nome: url.lastPathComponent))
         }
         // "Abrir com" deixa uma cópia em Documentos/Inbox (visível no app Arquivos): apaga
         if url.path.contains("/Documents/Inbox/") { try? FileManager.default.removeItem(at: url) }
@@ -101,6 +112,23 @@ final class Estudio {
         } catch {
             aviso = "Não consegui abrir o arquivo: \(error.localizedDescription)"
         }
+    }
+
+    /// Vários arquivos de uma vez (Arquivos ou Galeria): as imagens viram um lote só.
+    func importarVarios(_ urls: [URL]) {
+        var imagens: [URL] = []
+        for u in urls {
+            let acesso = u.startAccessingSecurityScopedResource()
+            defer { if acesso { u.stopAccessingSecurityScopedResource() } }
+            let destino = Nuvem.semColisao(Self.pastaRecebidos.appendingPathComponent(u.lastPathComponent))
+            do {
+                try FileManager.default.copyItem(at: u, to: destino)
+                if ehImagem(destino) { imagens.append(destino) } else { receber(.arquivo(destino, nome: u.lastPathComponent)) }
+            } catch {
+                aviso = "Não consegui abrir \(u.lastPathComponent): \(error.localizedDescription)"
+            }
+        }
+        if !imagens.isEmpty { receber(.imagens(imagens)) }
     }
 
     var aviso: String?
@@ -273,6 +301,54 @@ final class Estudio {
         }
     }
 
+    // --- imagens (no iPhone)
+
+    func converterImagens(_ arquivos: [URL], opcoes: OpcoesImagem) {
+        let titulo = arquivos.count == 1 ? arquivos[0].lastPathComponent : "\(arquivos.count) imagens"
+        let id = novoItem(.imagem, titulo, nuvem: false, mensagem: "Convertendo no iPhone")
+        let inicio = Date()
+        rodar(id) {
+            guard let item = self.historico.item(id) else { return }
+            try FileManager.default.createDirectory(at: item.pasta, withIntermediateDirectories: true)
+            var nomes: [String] = []
+            var usados = Set<String>()
+            var falhas: [String] = []
+            for (k, u) in arquivos.enumerated() {
+                try Task.checkCancellation()
+                self.etapa(id, "Convertendo \(k + 1) de \(arquivos.count)", Double(k) / Double(arquivos.count))
+                let pasta = item.pasta
+                let jaUsados = usados
+                do {
+                    let nome: String = try await Task.detached(priority: .userInitiated) {
+                        guard let info = ConversorImagem.info(u) else { throw ErroApp("não é uma imagem que o iPhone lê") }
+                        let formato = ConversorImagem.formatoFinal(opcoes, tipoOriginal: info.tipo)
+                        let (l, a) = GeometriaImagem.tamanhoFinal(info.largura, info.altura, opcoes)
+                        let base = Renomear.aplicar(opcoes.padraoNome, nome: (u.lastPathComponent as NSString).deletingPathExtension,
+                                                    indice: k + 1, largura: l, altura: a, data: info.data, digitos: opcoes.digitosContador)
+                        let ext = formato.extensao ?? "jpg"
+                        var nome = base + "." + ext, n = 2
+                        while jaUsados.contains(nome.lowercased()) || FileManager.default.fileExists(atPath: pasta.appendingPathComponent(nome).path) {
+                            nome = "\(base) (\(n)).\(ext)"; n += 1
+                        }
+                        try ConversorImagem.converter(u, opcoes, destino: pasta.appendingPathComponent(nome))
+                        return nome
+                    }.value
+                    usados.insert(nome.lowercased())
+                    nomes.append(nome)
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    falhas.append("\(u.lastPathComponent): \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)")
+                }
+            }
+            if nomes.isEmpty { throw ErroApp(falhas.first ?? "Nenhuma imagem convertida.") }
+            self.concluir(id, arquivos: nomes,
+                          resumo: falhas.isEmpty ? nil : "Não converti \(falhas.count): " + falhas.joined(separator: "; "),
+                          inicio: inicio)
+            arquivos.forEach { try? FileManager.default.removeItem(at: $0) }
+        }
+    }
+
     // --- links (baixados sempre pela nuvem)
 
     /// modo: "video" ou "audio"
@@ -336,6 +412,7 @@ final class Estudio {
                     switch tipo {
                     case .transcricao: try await self.guardarTranscricaoDaNuvem(id, r, base: base, inicio: inicio)
                     case .voz: try await self.guardarVozDaNuvem(id, r, inicio: inicio)
+                    case .imagem: break           // imagens nunca vão para a nuvem
                     case .video, .audio:
                         guard let tid = r["id"] as? Int, let item = self.historico.item(id) else { throw ErroApp("Resposta incompleta da nuvem.") }
                         let modo = tipo == .video ? "video" : "audio"

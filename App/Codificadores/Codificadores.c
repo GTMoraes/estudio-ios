@@ -5,6 +5,8 @@
 #include <time.h>
 #include <lame/lame.h>
 #include <vorbis/vorbisenc.h>
+#include <webp/encode.h>
+#include <webp/mux.h>
 
 /* ---------------------------------------------------------------- MP3 */
 
@@ -176,3 +178,55 @@ int cod_ogg_fechar(CodOGG *c) {
     free(c);
     return erro;
 }
+
+/* ---------------------------------------------------------------- WebP */
+
+int cod_webp(const unsigned char *rgba, int largura, int altura, int passo, int com_alfa,
+             float qualidade, int sem_perdas,
+             const unsigned char *exif, size_t nexif, const unsigned char *icc, size_t nicc,
+             unsigned char **saida, size_t *tam) {
+    *saida = NULL; *tam = 0;
+    WebPConfig cfg;
+    if (!WebPConfigInit(&cfg)) return -1;
+    cfg.quality = qualidade;           /* mesmos padrões do ImageMagick: método 4 */
+    cfg.method = 4;
+    cfg.lossless = sem_perdas ? 1 : 0;
+    if (!WebPValidateConfig(&cfg)) return -1;
+
+    WebPPicture pic;
+    if (!WebPPictureInit(&pic)) return -1;
+    pic.width = largura; pic.height = altura;
+    pic.use_argb = sem_perdas ? 1 : 0;
+    int ok = com_alfa ? WebPPictureImportRGBA(&pic, rgba, passo) : WebPPictureImportRGBX(&pic, rgba, passo);
+    if (!ok) { WebPPictureFree(&pic); return -2; }
+
+    WebPMemoryWriter wr;
+    WebPMemoryWriterInit(&wr);
+    pic.writer = WebPMemoryWrite;
+    pic.custom_ptr = &wr;
+    ok = WebPEncode(&cfg, &pic);
+    WebPPictureFree(&pic);
+    if (!ok) { WebPMemoryWriterClear(&wr); return -3; }
+
+    if ((!exif || !nexif) && (!icc || !nicc)) {       /* sem metadados: o arquivo já está pronto */
+        *saida = wr.mem; *tam = wr.size;
+        return 0;
+    }
+    WebPMux *mux = WebPMuxNew();
+    WebPData img = { wr.mem, wr.size }, fim = { NULL, 0 };
+    int r = -4;
+    if (mux && WebPMuxSetImage(mux, &img, 1) == WEBP_MUX_OK) {
+        WebPData d;
+        int bom = 1;
+        if (exif && nexif) { d.bytes = exif; d.size = nexif; bom = WebPMuxSetChunk(mux, "EXIF", &d, 1) == WEBP_MUX_OK; }
+        if (bom && icc && nicc) { d.bytes = icc; d.size = nicc; bom = WebPMuxSetChunk(mux, "ICCP", &d, 1) == WEBP_MUX_OK; }
+        if (bom && WebPMuxAssemble(mux, &fim) == WEBP_MUX_OK) {
+            *saida = (unsigned char *)fim.bytes; *tam = fim.size; r = 0;
+        }
+    }
+    WebPMuxDelete(mux);
+    WebPMemoryWriterClear(&wr);
+    return r;
+}
+
+void cod_webp_liberar(unsigned char *p) { WebPFree(p); }

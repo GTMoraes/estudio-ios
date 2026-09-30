@@ -17,7 +17,7 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     TARGETED_DEVICE_FAMILY: "1"
-    MARKETING_VERSION: "0.4.0"
+    MARKETING_VERSION: "0.5.0"
     CURRENT_PROJECT_VERSION: "1"
     CODE_SIGNING_ALLOWED: "NO"
     CODE_SIGNING_REQUIRED: "NO"
@@ -57,7 +57,7 @@ targets:
         UIUserInterfaceStyle: Dark
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
-        NSPhotoLibraryAddUsageDescription: Para salvar no Fotos os vídeos que você baixar.
+        NSPhotoLibraryAddUsageDescription: Para salvar no Fotos os vídeos e as imagens que você converter ou baixar.
         CFBundleURLTypes:
           - CFBundleURLName: com.gtm.estudio
             CFBundleURLSchemes:
@@ -73,13 +73,18 @@ targets:
             LSHandlerRank: Alternate
             LSItemContentTypes:
               - public.movie
+          - CFBundleTypeName: Imagem
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - public.image
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gtm.estudio
         SWIFT_OBJC_BRIDGING_HEADER: App/Codificadores/Estudio-Bridging-Header.h
         HEADER_SEARCH_PATHS: "$(PROJECT_DIR)/vendor/include $(PROJECT_DIR)/App/MotorVoz"
         LIBRARY_SEARCH_PATHS: $(PROJECT_DIR)/vendor/lib
-        OTHER_LDFLAGS: "-lmp3lame -lvorbisenc -lvorbis -logg -lc++ -framework CoreML"
+        OTHER_LDFLAGS: "-lmp3lame -lvorbisenc -lvorbis -logg -lwebpmux -lwebp -lsharpyuv -lc++ -framework CoreML"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
     scheme: {}
@@ -108,8 +113,9 @@ targets:
               NSExtensionActivationSupportsWebURLWithMaxCount: 1
               NSExtensionActivationSupportsText: true
               NSExtensionActivationSupportsMovieWithMaxCount: 5
-              NSExtensionActivationSupportsFileWithMaxCount: 5
-              NSExtensionActivationSupportsAttachmentsWithMaxCount: 5
+              NSExtensionActivationSupportsImageWithMaxCount: 50
+              NSExtensionActivationSupportsFileWithMaxCount: 50
+              NSExtensionActivationSupportsAttachmentsWithMaxCount: 50
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gtm.estudio.compartilhar

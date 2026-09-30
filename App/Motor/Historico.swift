@@ -3,7 +3,7 @@ import Observation
 
 /// Um resultado guardado neste iPhone (Documentos/Resultados/<id>/).
 struct Item: Codable, Identifiable, Equatable {
-    enum Tipo: String, Codable { case transcricao, voz, video, audio }
+    enum Tipo: String, Codable { case transcricao, voz, video, audio, imagem }
     enum Estado: String, Codable { case processando, pronto, erro }
 
     var id = UUID()
@@ -29,6 +29,7 @@ struct Item: Codable, Identifiable, Equatable {
         case .voz: return "waveform"
         case .video: return "film"
         case .audio: return "music.note"
+        case .imagem: return "photo"
         }
     }
 }

@@ -2,7 +2,7 @@ import UIKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Extensão "Compartilhar": recebe link, vídeo ou áudio, guarda na caixa do
+/// Extensão "Compartilhar": recebe link, vídeo, áudio ou imagem, guarda na caixa do
 /// grupo de apps e abre o Estúdio para continuar. Não processa nada aqui
 /// (extensões têm pouca memória e são encerradas a qualquer momento).
 @objc(ShareViewController)
@@ -43,7 +43,7 @@ final class ShareViewController: UIViewController {
             }
         }
         if guardados == 0 {
-            estado.fase = .erro(erro ?? "Não encontrei link, vídeo nem áudio no que foi compartilhado.")
+            estado.fase = .erro(erro ?? "Não encontrei link, vídeo, áudio nem imagem no que foi compartilhado.")
             return
         }
         estado.fase = .abrindo
@@ -58,7 +58,7 @@ final class ShareViewController: UIViewController {
     /// Guarda um anexo. Ordem: arquivo de mídia > link > texto com link.
     private func guardar(_ prov: NSItemProvider) async throws -> Bool {
         let id = UUID().uuidString
-        for tipo in [UTType.movie, UTType.audio] where prov.hasItemConformingToTypeIdentifier(tipo.identifier) {
+        for tipo in [UTType.movie, UTType.audio, UTType.image] where prov.hasItemConformingToTypeIdentifier(tipo.identifier) {
             // pede o tipo exato que o app de origem registrou (o original, ex.: .mov HEVC)
             // em vez do genérico, que pode vir convertido para "mais compatível"
             let original = prov.registeredTypeIdentifiers

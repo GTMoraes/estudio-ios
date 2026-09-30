@@ -158,7 +158,7 @@ private final class HostVoz {
     init(ort: OpaquePointer?, coreml: MotorCoreML?, progresso: @escaping (Int32, Double) -> Void) {
         self.ort = ort
         self.coreml = coreml
-        self.usarCoreML = [coreml != nil, coreml != nil]
+        self.usarCoreML = [coreml != nil && !HostVoz.conferencia(0).falhou, coreml != nil && !HostVoz.conferencia(1).falhou]
         self.progresso = progresso
     }
     deinit { mv_ort_fechar(ort) }
@@ -169,7 +169,20 @@ private final class HostVoz {
         return s.isEmpty ? nil : s
     }
 
-    /// Na 1ª vez de cada modelo na GPU, roda o mesmo trecho também no processador (ONNX
+    /// Resultado guardado da conferência de cada modelo, válido para esta versão do iOS
+    /// (o Core ML e o driver da GPU mudam com o sistema; numa versão nova, confere de novo).
+    private static var versaoSistema: String { ProcessInfo.processInfo.operatingSystemVersionString }
+    static func conferencia(_ modelo: Int32) -> (feita: Bool, falhou: Bool) {
+        guard let v = UserDefaults.standard.string(forKey: "vozConferencia\(modelo)") else { return (false, false) }
+        let partes = v.split(separator: "|", maxSplits: 1).map(String.init)
+        guard partes.count == 2, partes[1] == versaoSistema else { return (false, false) }
+        return (true, partes[0] == "falhou")
+    }
+    private static func guardarConferencia(_ modelo: Int32, ok: Bool) {
+        UserDefaults.standard.set((ok ? "ok|" : "falhou|") + versaoSistema, forKey: "vozConferencia\(modelo)")
+    }
+
+    /// Na 1ª vez de cada modelo na GPU (nesta versão do iOS), roda o mesmo trecho também no processador (ONNX
     /// Runtime) e compara. Se a diferença passar do aceitável, esse modelo volta para o
     /// processador e o resultado fica igual ao da nuvem.
     func conferir(_ modelo: Int32, _ entrada: UnsafePointer<Float>, _ saidaGPU: UnsafeMutablePointer<Float>) {
@@ -189,6 +202,7 @@ private final class HostVoz {
         }
         let snr = erro > 0 ? 10 * log10(sinal / erro) : 200
         let ok = snr >= 60
+        Self.guardarConferencia(modelo, ok: ok)
         Diagnostico.log(String(format: "conferência GPU x processador, modelo %d: %.1f dB %@", modelo, snr,
                                ok ? "(ok)" : "(diferente demais: este modelo volta para o processador)"))
         if !ok {
@@ -208,7 +222,11 @@ private let cInferir: MVInferir = { ctx, modelo, entrada, saida in
             try cm.inferir(Int(modelo), entrada, saida)
             if primeira {
                 Diagnostico.log("modelo \(modelo): 1ª inferência na GPU ok")
-                h.conferir(modelo, entrada, saida)
+                if HostVoz.conferencia(modelo).feita {
+                    Diagnostico.log("modelo \(modelo): já conferido com o processador nesta versão do iOS")
+                } else {
+                    h.conferir(modelo, entrada, saida)
+                }
             }
             return 0
         } catch {

@@ -8,6 +8,9 @@ struct NovoView: View {
     @State private var escolhendoArquivo = false
     @State private var itemGaleria: PhotosPickerItem?
     @State private var carregandoGaleria = false
+    @State private var escolhendoImagens = false
+    @State private var fotosGaleria: [PhotosPickerItem] = []
+    @State private var carregandoFotos = false
 
     var body: some View {
         NavigationStack {
@@ -57,6 +60,27 @@ struct NovoView: View {
                             .font(.footnote).foregroundStyle(Tema.texto2)
                     }
 
+                    Cartao(titulo: "Imagens", icone: "photo.stack") {
+                        GlassEffectContainer(spacing: 12) {
+                            HStack(spacing: 12) {
+                                Button { escolhendoImagens = true } label: {
+                                    Label("Arquivos", systemImage: "folder.fill").frame(maxWidth: .infinity).padding(.vertical, 6)
+                                }
+                                .buttonStyle(.glass)
+                                // .current: o arquivo original (HEIC com a cor P3 e os metadados), sem o iOS converter antes
+                                PhotosPicker(selection: $fotosGaleria, maxSelectionCount: 50, matching: .images,
+                                             preferredItemEncoding: .current) {
+                                    Label(carregandoFotos ? "Abrindo…" : "Galeria", systemImage: "photo.on.rectangle")
+                                        .frame(maxWidth: .infinity).padding(.vertical, 6)
+                                }
+                                .buttonStyle(.glass)
+                                .disabled(carregandoFotos)
+                            }
+                        }
+                        Text("Converter para WebP, JPG, HEIC ou PNG, reduzir, cortar e limpar os metadados — uma ou várias de uma vez.")
+                            .font(.footnote).foregroundStyle(Tema.texto2)
+                    }
+
                     Cartao(titulo: "Pelo Compartilhar", icone: "square.and.arrow.up") {
                         Text("Em qualquer app, toque em Compartilhar e escolha **Estúdio** — vale para vídeos, áudios e links. Se ele não aparecer na lista, toque em “Mais” e ative.")
                             .font(.subheadline).foregroundStyle(Tema.texto2)
@@ -67,16 +91,33 @@ struct NovoView: View {
             }
             .telaEscura()
             .navigationTitle("Estúdio")
-            .fileImporter(isPresented: $escolhendoArquivo, allowedContentTypes: [.audio, .movie, .audiovisualContent],
+            // um .fileImporter só: dois na mesma tela brigam e só o último funciona
+            .fileImporter(isPresented: Binding(get: { escolhendoArquivo || escolhendoImagens },
+                                               set: { if !$0 { escolhendoArquivo = false; escolhendoImagens = false } }),
+                          allowedContentTypes: escolhendoImagens ? [.image] : [.audio, .movie, .audiovisualContent],
                           allowsMultipleSelection: true) { r in
                 // o seletor ainda está fechando quando este bloco roda; abrir a folha agora
                 // faz o iOS descartá-la em silêncio. Espera o seletor sumir.
                 Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 600_000_000)
                     switch r {
-                    case .success(let urls): urls.forEach { estudio.importar($0) }
+                    case .success(let urls): estudio.importarVarios(urls)
                     case .failure(let erro): estudio.aviso = "Não consegui abrir o arquivo: \(erro.localizedDescription)"
                     }
+                }
+            }
+            .onChange(of: fotosGaleria) { _, novos in
+                guard !novos.isEmpty else { return }
+                carregandoFotos = true
+                Task {
+                    defer { carregandoFotos = false; fotosGaleria = [] }
+                    var urls: [URL] = []
+                    for item in novos {
+                        if let f = try? await item.loadTransferable(type: ImagemDaGaleria.self) { urls.append(f.url) }
+                    }
+                    if urls.isEmpty { estudio.aviso = "Não consegui abrir as fotos da galeria."; return }
+                    estudio.importarVarios(urls)
+                    urls.forEach { try? FileManager.default.removeItem(at: $0) }
                 }
             }
             .onChange(of: itemGaleria) { _, novo in
@@ -119,6 +160,20 @@ struct VideoDaGaleria: Transferable {
                 .appendingPathComponent(UUID().uuidString + "-" + recebido.file.lastPathComponent)
             try FileManager.default.copyItem(at: recebido.file, to: destino)
             return VideoDaGaleria(url: destino, nome: recebido.file.lastPathComponent)
+        }
+    }
+}
+
+/// Foto da galeria copiada como arquivo (o original: HEIC, JPG, PNG…).
+struct ImagemDaGaleria: Transferable {
+    let url: URL
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(importedContentType: .image) { recebido in
+            let pasta = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+            try FileManager.default.createDirectory(at: pasta, withIntermediateDirectories: true)
+            let destino = pasta.appendingPathComponent(recebido.file.lastPathComponent)
+            try FileManager.default.copyItem(at: recebido.file, to: destino)
+            return ImagemDaGaleria(url: destino)
         }
     }
 }

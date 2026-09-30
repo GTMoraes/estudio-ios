@@ -3,7 +3,7 @@
 App de iPhone que junta o whisper.frx9.com e o ConversorMidia: baixar links (YouTube, Instagram…),
 transcrever (texto `.txt` + legenda `.srt`) e tratar voz. Liquid Glass, tema escuro, iOS 26+.
 
-## O que roda onde (versão 0.4)
+## O que roda onde (versão 0.5)
 
 | Função | No iPhone | Na nuvem |
 |---|---|---|
@@ -12,7 +12,7 @@ transcrever (texto `.txt` + legenda `.srt`) e tratar voz. Liquid Glass, tema esc
 | Tratar voz (fala / só voz / música, eco, clareza, voz à frente, destino Quadra) | ✅ o mesmo motor da nuvem, portado para C; modelos baixados na 1ª vez de `cdn.frx9.com/modelos` | ✅ (Quadra: ainda não) |
 | Converter vídeo (presets do ConversorMidia + os seus, HDR, resolução 1080p/personalizada, qualidade/Mb/s/tamanho, velocidade com o som no mesmo tom, corte) | ✅ chip de vídeo (HEVC/H.264) | (AV1: futuro, pela nuvem) |
 | Extrair/converter áudio: M4A, WAV, MP3, OGG | ✅ (MP3 = LAME, OGG = Vorbis, compilados no app) | — |
-| Converter imagem | (próxima versão) | — |
+| Converter imagem (WebP, JPG, HEIC, PNG, AVIF se o iOS tiver; tamanho, recorte, metadados, alvo em KB, nomes) | ✅ ImageIO + libwebp 1.5.0 (compilada no app) | — |
 
 A "nuvem" é o whisper.frx9.com, com o mesmo usuário e senha do site — o app usa a mesma API,
 nada muda no servidor. A senha fica no Keychain do iPhone para renovar a sessão sozinho.
@@ -31,10 +31,21 @@ nada muda no servidor. A senha fica no Keychain do iPhone para renovar a sessão
 - Diferenças em relação à nuvem: blocos de 5 min (a nuvem usa 20 min; só muda onde ficam as
   emendas em áudios longos) e MP3 a 44,1 kHz (a nuvem reamostra para 48 kHz).
 - Modelos (290 MB) em `Application Support/modelos-voz`, fora do backup. Ajustes → "Tratar voz
-  no iPhone" mostra, baixa e apaga. "Usar o Neural Engine" vem desligado (resultado igual ao da
-  nuvem); ligado pode acelerar, mas faz as contas com menos precisão.
+  no iPhone" mostra, baixa e apaga. Acelerador: GPU (padrão, Core ML nativo em float32,
+  modelos em `cdn.frx9.com/modelos/coreml/`, conferidos contra o processador uma vez por
+  versão do iOS) ou Processador (ONNX Runtime 1.19.2).
 - No servidor: os dois `.onnx` ficam em `~/sites-frx9/cdn/modelos/` (permissão 644), servidos
   em `https://cdn.frx9.com/modelos/`.
+
+## Converter imagem
+
+- Código: `App/Motor/ConversorImagem.swift` (motor) e `App/Telas/ImagemView.swift` (tela e recorte).
+- Entrada: Arquivos, Fotos (até 50 por vez, no formato original) ou Compartilhar.
+- Redimensionar com Lanczos (vImage); cor convertida para sRGB; orientação aplicada.
+- Metadados: só a data, tudo (com opção de tirar o GPS) ou nada.
+- WebP pela libwebp 1.5.0 (`scripts/compilar-codificadores.sh`), com EXIF e perfil ICC.
+- Alvo em KB: busca a maior qualidade (30–95) que cabe no tamanho, em até 7 tentativas.
+- JPG/HEIC saem pelo codificador da Apple: não ficam idênticos aos do ConversorMidia no Windows.
 
 ## Como gerar o IPA (sem Mac)
 
