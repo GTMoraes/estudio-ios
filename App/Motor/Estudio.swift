@@ -151,6 +151,7 @@ final class Estudio {
 
     private func etapa(_ id: UUID, _ msg: String, _ p: Double? = nil) {
         historico.atualizar(id, salvarAgora: false) { $0.mensagem = msg; $0.progresso = p }
+        SegundoPlano.shared.progresso(id, p, msg)
     }
 
     private func concluir(_ id: UUID, arquivos: [String], resumo: String? = nil, inicio: Date, duracao: Double? = nil) {
@@ -159,7 +160,9 @@ final class Estudio {
             $0.arquivos = arquivos; $0.resumo = resumo; $0.trabalho = nil
             $0.duracaoProcesso = Date().timeIntervalSince(inicio)
             if let duracao { $0.duracaoAudio = duracao }
+            $0.retomada = nil
         }
+        Trabalhos.apagar(id)
         atualizarTela()
     }
 
@@ -169,24 +172,182 @@ final class Estudio {
         atualizarTela()
     }
 
-    private func rodar(_ id: UUID, _ corpo: @escaping @MainActor () async throws -> Void) {
+    /// segundoPlano: título da Atividade ao Vivo (só trabalhos sem GPU: imagens e nuvem).
+    /// recomecar: se falhar porque o app saiu da tela, espera ele voltar e recomeça (vídeo, transcrição).
+    private func rodar(_ id: UUID, segundoPlano: String? = nil, recomecar: Bool = false,
+                       _ corpo: @escaping @MainActor () async throws -> Void) {
+        descartar.remove(id)
+        if let titulo = segundoPlano {
+            // o sistema (ou você, pela Atividade ao Vivo) encerrou o segundo plano: no iPhone, para e
+            // fica para continuar; na nuvem, o trabalho segue lá e o app retoma ao voltar
+            SegundoPlano.shared.iniciar(id, titulo: titulo) { [weak self] in
+                guard let self, self.historico.item(id)?.naNuvem == false else { return }
+                self.pausar(id)
+            }
+        }
         tarefas[id] = Task { @MainActor in
-            do { try await corpo() }
-            catch is CancellationError { self.historico.atualizar(id) { $0.estado = .erro; $0.mensagem = "Cancelado" } }
-            catch { self.falhar(id, error) }
+            var ok = false
+            var tentativas = 0
+            while true {
+                let geracao = EstadoApp.shared.geracao
+                do { try await corpo(); ok = true; break }
+                catch is CancellationError { self.interrompido(id); break }
+                catch {
+                    if recomecar, tentativas < 3, EstadoApp.shared.geracao != geracao, !Task.isCancelled {
+                        tentativas += 1
+                        self.etapa(id, "Pausado: volte ao Estúdio para continuar")
+                        await EstadoApp.shared.aguardarAtivo()
+                        self.limparResultado(id)
+                        continue
+                    }
+                    self.falhar(id, error)
+                    break
+                }
+            }
+            SegundoPlano.shared.terminar(id, ok: ok)
+            self.liberarVez(id)
             self.tarefas[id] = nil
             self.atualizarTela()
         }
         atualizarTela()
     }
 
-    func cancelar(_ id: UUID) { tarefas[id]?.cancel() }
+    /// Cancelado: pelo botão (descarta) ou pelo sistema (fica para continuar depois).
+    private func interrompido(_ id: UUID) {
+        let podeContinuar = !descartar.contains(id) && historico.item(id)?.retomada != nil && Trabalhos.existe(id)
+        historico.atualizar(id) {
+            $0.estado = .erro
+            $0.progresso = nil
+            $0.mensagem = podeContinuar ? "Interrompido. Toque em Continuar." : "Cancelado"
+            if !podeContinuar { $0.retomada = nil }
+        }
+        if !podeContinuar { Trabalhos.apagar(id) }
+        descartar.remove(id)
+    }
+
+    private func limparResultado(_ id: UUID) {
+        guard let item = historico.item(id) else { return }
+        try? FileManager.default.removeItem(at: item.pasta)
+        try? FileManager.default.createDirectory(at: item.pasta, withIntermediateDirectories: true)
+    }
+
+    private var descartar = Set<UUID>()
+
+    // --- fila do iPhone: um trabalho pesado por vez (dois modelos juntos estouram a memória
+    // e disputam a GPU/Neural Engine). Os trabalhos na nuvem não entram na fila.
+    private var filaLocal: [UUID] = []
+    private var vezDe: UUID?
+
+    /// Espera a vez de usar o iPhone. Cancelável (o Task.sleep lança ao cancelar).
+    private func aguardarVez(_ id: UUID) async throws {
+        if vezDe == id { return }
+        if !filaLocal.contains(id) { filaLocal.append(id) }
+        var ultimaPos = -1
+        while true {
+            try Task.checkCancellation()
+            if vezDe == nil, filaLocal.first == id {
+                filaLocal.removeFirst()
+                vezDe = id
+                return
+            }
+            let pos = (filaLocal.firstIndex(of: id) ?? 0) + (vezDe == nil ? 0 : 1)
+            if pos != ultimaPos {
+                ultimaPos = pos
+                etapa(id, pos <= 1 ? "Na fila: começa quando o trabalho atual terminar"
+                                   : "Na fila (\(pos)º): começa quando os anteriores terminarem")
+            }
+            try await Task.sleep(nanoseconds: 400_000_000)
+        }
+    }
+
+    private func liberarVez(_ id: UUID) {
+        filaLocal.removeAll { $0 == id }
+        if vezDe == id { vezDe = nil }
+    }
+
+    /// Cancelar pelo app: para e apaga o que estava guardado para continuar.
+    func cancelar(_ id: UUID) {
+        descartar.insert(id)
+        tarefas[id]?.cancel()
+        if tarefas[id] == nil, historico.item(id)?.retomada != nil {
+            historico.atualizar(id) { $0.retomada = nil; $0.mensagem = "Cancelado" }
+            Trabalhos.apagar(id)
+        }
+    }
+    /// Parar sem descartar (sistema encerrou a tarefa em segundo plano).
+    private func pausar(_ id: UUID) { tarefas[id]?.cancel() }
     func rodando(_ id: UUID) -> Bool { tarefas[id] != nil }
 
-    /// Tela sempre acesa enquanto houver trabalho no iPhone (o iOS pausa apps em segundo plano).
+    /// Há trabalho rodando no iPhone (mostra o aviso para não sair do app).
+    var processandoLocal: Bool {
+        historico.itens.contains { !$0.naNuvem && $0.estado == .processando && tarefas[$0.id] != nil }
+    }
+
+    /// Tela sempre acesa enquanto houver trabalho no iPhone (fora da tela o iOS pausa o app).
     private func atualizarTela() {
-        let local = historico.itens.contains { !$0.naNuvem && $0.estado == .processando && tarefas[$0.id] != nil }
-        UIApplication.shared.isIdleTimerDisabled = local
+        UIApplication.shared.isIdleTimerDisabled = processandoLocal
+    }
+
+    /// Trabalhos que o iOS interrompeu (app fechado): o aviso ao abrir oferece continuar.
+    var interrompidos: [UUID] = []
+
+    /// O app saiu ou voltou para a tela.
+    func faseMudou(ativo: Bool) {
+        EstadoApp.shared.mudar(ativo: ativo)
+        if ativo {
+            Notificacoes.limpar()
+            return
+        }
+        let locais = historico.itens.filter { !$0.naNuvem && $0.estado == .processando && tarefas[$0.id] != nil }
+        guard !locais.isEmpty else { return }
+        let soImagens = locais.allSatisfy { $0.tipo == .imagem }
+        if soImagens { return }            // imagens seguem em segundo plano (Atividade ao Vivo)
+        for i in locais where i.tipo != .imagem {
+            historico.atualizar(i.id, salvarAgora: false) { $0.mensagem = "Pausado: volte ao Estúdio para continuar" }
+        }
+        Notificacoes.avisar("Processamento pausado",
+                            "O Estúdio precisa ficar aberto para processar. Volte ao app para continuar de onde parou.")
+    }
+
+    /// Continua um trabalho interrompido, com o que ficou guardado.
+    func continuar(_ id: UUID) {
+        guard tarefas[id] == nil, let item = historico.item(id), let r = item.retomada else { return }
+        guard Trabalhos.existe(id) else {
+            historico.atualizar(id) { $0.retomada = nil; $0.mensagem = "Os arquivos de entrada não existem mais. Envie de novo." }
+            return
+        }
+        interrompidos.removeAll { $0 == id }
+        historico.atualizar(id) { $0.estado = .processando; $0.mensagem = "Continuando"; $0.progresso = nil }
+        switch r.tipo {
+        case .voz: executarVoz(id)
+        case .conversao: executarConversao(id)
+        case .imagens: executarImagens(id)
+        case .transcricao: executarTranscricao(id)
+        }
+    }
+
+    func continuarInterrompidos() {
+        let ids = interrompidos
+        interrompidos = []
+        ids.forEach { continuar($0) }
+    }
+
+    /// Guarda a entrada na pasta de trabalho e o que é preciso para continuar depois.
+    private func prepararTrabalho(_ id: UUID, _ arquivos: [URL], _ r: Retomada) -> Bool {
+        var r = r
+        do {
+            r.entradas = try Trabalhos.guardar(id, arquivos)
+        } catch {
+            falhar(id, ErroApp("Não consegui guardar o arquivo para processar: \(error.localizedDescription)"))
+            return false
+        }
+        historico.atualizar(id) { $0.retomada = r }
+        Notificacoes.pedirPermissao()
+        return true
+    }
+
+    private func entrada(_ id: UUID, _ nome: String) -> URL {
+        Trabalhos.entradas(id).appendingPathComponent(nome)
     }
 
     // --- transcrição
@@ -196,8 +357,13 @@ final class Estudio {
         let base = PadraoNome.base(nome, padrao: padrao, data: data)
         let id = novoItem(.transcricao, nome, nuvem: naNuvem, mensagem: naNuvem ? "Enviando para a nuvem" : "Preparando", base: base)
         let inicio = Date()
-        rodar(id) {
-            if naNuvem {
+        if !naNuvem {
+            let r = Retomada(tipo: .transcricao, entradas: [], nome: nome, base: base, data: data, idioma: idioma)
+            if prepararTrabalho(id, [arquivo], r) { executarTranscricao(id) }
+            return
+        }
+        rodar(id, segundoPlano: "Transcrição na nuvem") {
+            do {
                 let uid = try await self.nuvem.enviar(arquivo, nome: nome) { p in
                     Task { @MainActor in self.etapa(id, "Enviando para a nuvem", p) }
                 }
@@ -205,14 +371,24 @@ final class Estudio {
                 self.historico.atualizar(id) { $0.trabalho = job }
                 let r = try await self.nuvem.aguardar(job) { m in Task { @MainActor in self.etapa(id, m) } }
                 try await self.guardarTranscricaoDaNuvem(id, r, base: base, inicio: inicio)
-            } else {
-                let segs = try await TranscritorLocal.shared.transcrever(
-                    arquivo, modelo: self.modeloLocal, idioma: idioma == "auto" ? nil : idioma
-                ) { msg, p in Task { @MainActor in self.etapa(id, msg, p) } }
-                let dur = await AudioUtil.duracao(arquivo)
-                try self.guardarTranscricao(id, segs, base: base, inicio: inicio, duracao: dur)
             }
             try? FileManager.default.removeItem(at: arquivo)
+        }
+    }
+
+    private func executarTranscricao(_ id: UUID) {
+        guard let r = historico.item(id)?.retomada, let nomeEntrada = r.entradas.first else { return }
+        let arquivo = entrada(id, nomeEntrada)
+        let base = r.base ?? Self.base(r.nome)
+        let idioma = r.idioma ?? "pt"
+        let inicio = Date()
+        rodar(id, recomecar: true) {
+            try await self.aguardarVez(id)
+            let segs = try await TranscritorLocal.shared.transcrever(
+                arquivo, modelo: self.modeloLocal, idioma: idioma == "auto" ? nil : idioma
+            ) { msg, p in Task { @MainActor in self.etapa(id, msg, p) } }
+            let dur = await AudioUtil.duracao(arquivo)
+            try self.guardarTranscricao(id, segs, base: base, inicio: inicio, duracao: dur)
         }
     }
 
@@ -253,18 +429,11 @@ final class Estudio {
                           base: personalizado ? base : nil)
         let inicio = Date()
         if !naNuvem {
-            rodar(id) {
-                guard let item = self.historico.item(id) else { return }
-                let r = try await VozLocal.tratar(arquivo, opcoes: OpcoesVozLocal(voz: opcoes, quadra: quadra),
-                                                  pasta: item.pasta, base: base) { msg, p in
-                    Task { @MainActor in self.etapa(id, msg, p) }
-                }
-                self.concluir(id, arquivos: r.arquivos, inicio: inicio, duracao: r.duracao)
-                try? FileManager.default.removeItem(at: arquivo)
-            }
+            let r = Retomada(tipo: .voz, entradas: [], nome: nome, base: base, data: data, voz: opcoes, quadra: quadra)
+            if prepararTrabalho(id, [arquivo], r) { executarVoz(id) }
             return
         }
-        rodar(id) {
+        rodar(id, segundoPlano: "Tratar voz na nuvem") {
             let uid = try await self.nuvem.enviar(arquivo, nome: nome) { p in
                 Task { @MainActor in self.etapa(id, "Enviando para a nuvem", p) }
             }
@@ -273,6 +442,26 @@ final class Estudio {
             let r = try await self.nuvem.aguardar(job) { m in Task { @MainActor in self.etapa(id, m) } }
             try await self.guardarVozDaNuvem(id, r, inicio: inicio, base: personalizado ? base : nil)
             try? FileManager.default.removeItem(at: arquivo)
+        }
+    }
+
+    /// Voz no iPhone. Pausa fora da tela (a GPU não roda em segundo plano) e, se o app for
+    /// fechado, continua do último bloco de 5 min pronto (os intermediários ficam em Trabalhos/<id>/voz).
+    private func executarVoz(_ id: UUID) {
+        guard let r = historico.item(id)?.retomada, let voz = r.voz, let nomeEntrada = r.entradas.first else { return }
+        let arquivo = entrada(id, nomeEntrada)
+        let base = r.base ?? Self.base(r.nome)
+        let quadra = r.quadra ?? false
+        let inicio = Date()
+        rodar(id) {
+            try await self.aguardarVez(id)
+            guard let item = self.historico.item(id) else { return }
+            let res = try await VozLocal.tratar(arquivo, opcoes: OpcoesVozLocal(voz: voz, quadra: quadra),
+                                                pasta: item.pasta, base: base,
+                                                trabalho: Trabalhos.pasta(id).appendingPathComponent("voz", isDirectory: true)) { msg, p in
+                Task { @MainActor in self.etapa(id, msg, p) }
+            }
+            self.concluir(id, arquivos: res.arquivos, inicio: inicio, duracao: res.duracao)
         }
     }
 
@@ -304,16 +493,31 @@ final class Estudio {
         let base = PadraoNome.base(nome, padrao: padrao, data: opcoes.usarDataAtual && tipo == .video ? Date() : data,
                                   largura: dims?.0, altura: dims?.1)
         let id = novoItem(tipo, nome, nuvem: false, mensagem: "Convertendo no iPhone")
+        if info.temVideo {
+            historico.atualizar(id) {
+                $0.origemMidia = OrigemMidia(nome: nome, largura: info.largura, altura: info.altura, bytes: info.tamanhoBytes,
+                                             duracao: info.duracao, fps: info.fps, codec: info.codecVideo,
+                                             hdr: info.hdr.rawValue, dolbyVision: info.dolbyVision, ambienteLux: nil, data: data)
+            }
+        }
+        let r = Retomada(tipo: .conversao, entradas: [], nome: nome, base: base, data: data, conversao: opcoes)
+        if prepararTrabalho(id, [arquivo], r) { executarConversao(id) }
+    }
+
+    /// Conversão no iPhone. Se falhar porque o app saiu da tela, recomeça quando ele volta
+    /// (o codificador de vídeo não permite continuar no meio).
+    private func executarConversao(_ id: UUID) {
+        guard let r = historico.item(id)?.retomada, let opcoes = r.conversao, let nomeEntrada = r.entradas.first else { return }
+        let arquivo = entrada(id, nomeEntrada)
+        let base = r.base ?? Self.base(r.nome)
         let inicio = Date()
-        rodar(id) {
+        rodar(id, recomecar: true) {
+            try await self.aguardarVez(id)
             guard let item = self.historico.item(id) else { return }
-            if info.temVideo {
+            let info = try await InfoMidia.ler(arquivo)
+            if info.temVideo, item.origemMidia?.ambienteLux == nil, info.hdr != .sdr {
                 let lux = await DetalhesVideo.ambienteLux(arquivo)
-                self.historico.atualizar(id) {
-                    $0.origemMidia = OrigemMidia(nome: nome, largura: info.largura, altura: info.altura, bytes: info.tamanhoBytes,
-                                                 duracao: info.duracao, fps: info.fps, codec: info.codecVideo,
-                                                 hdr: info.hdr.rawValue, dolbyVision: info.dolbyVision, ambienteLux: lux, data: data)
-                }
+                self.historico.atualizar(id) { $0.origemMidia?.ambienteLux = lux }
             }
             let saida = try await ConversorVideo.converter(arquivo, info: info, opcoes: opcoes, pasta: item.pasta,
                                                            base: base) { p in
@@ -321,7 +525,6 @@ final class Estudio {
             }
             self.concluir(id, arquivos: [saida.lastPathComponent], inicio: inicio,
                           duracao: PlanoConversao.duracao(info, opcoes))
-            try? FileManager.default.removeItem(at: arquivo)
         }
     }
 
@@ -330,19 +533,30 @@ final class Estudio {
     func converterImagens(_ arquivos: [URL], opcoes: OpcoesImagem) {
         let titulo = arquivos.count == 1 ? arquivos[0].lastPathComponent : "\(arquivos.count) imagens"
         let id = novoItem(.imagem, titulo, nuvem: false, mensagem: "Convertendo no iPhone")
+        var r = Retomada(tipo: .imagens, entradas: [], nome: titulo, imagem: opcoes)
+        r.saidas = Array(repeating: nil, count: arquivos.count)
+        r.falhas = []
+        if prepararTrabalho(id, arquivos, r) { executarImagens(id) }
+    }
+
+    /// Imagens no iPhone: seguem em segundo plano (só processador). Se o app for fechado,
+    /// continuar pula as que já ficaram prontas.
+    private func executarImagens(_ id: UUID) {
+        guard let r0 = historico.item(id)?.retomada, let opcoes = r0.imagem else { return }
+        let total = r0.entradas.count
         let inicio = Date()
-        rodar(id) {
+        rodar(id, segundoPlano: total == 1 ? "Convertendo 1 imagem" : "Convertendo \(total) imagens") {
+            try await self.aguardarVez(id)
             guard let item = self.historico.item(id) else { return }
             try FileManager.default.createDirectory(at: item.pasta, withIntermediateDirectories: true)
-            var nomes: [String] = []
-            var usados = Set<String>()
-            var falhas: [String] = []
-            var origens: [String: OrigemImagem] = [:]
-            for (k, u) in arquivos.enumerated() {
+            for k in 0..<total {
                 try Task.checkCancellation()
-                self.etapa(id, "Convertendo \(k + 1) de \(arquivos.count)", Double(k) / Double(arquivos.count))
+                guard let r = self.historico.item(id)?.retomada else { return }
+                if let feita = r.saidas?[k] ?? nil, !feita.isEmpty { continue }
+                let u = self.entrada(id, r.entradas[k])
+                self.etapa(id, "Convertendo \(k + 1) de \(total)", Double(k) / Double(total))
                 let pasta = item.pasta
-                let jaUsados = usados
+                let jaUsados = Set((r.saidas ?? []).compactMap { $0?.lowercased() })
                 do {
                     let (nome, origem): (String, OrigemImagem) = try await Task.detached(priority: .userInitiated) {
                         guard let info = ConversorImagem.info(u) else { throw ErroApp("não é uma imagem que o iPhone lê") }
@@ -362,21 +576,27 @@ final class Estudio {
                         try ConversorImagem.converter(u, opcoes, destino: pasta.appendingPathComponent(nome))
                         return (nome, origem)
                     }.value
-                    usados.insert(nome.lowercased())
-                    nomes.append(nome)
-                    origens[nome] = origem
+                    self.historico.atualizar(id) {
+                        $0.retomada?.saidas?[k] = nome
+                        var o = $0.origens ?? [:]; o[nome] = origem; $0.origens = o
+                    }
                 } catch is CancellationError {
                     throw CancellationError()
                 } catch {
-                    falhas.append("\(u.lastPathComponent): \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)")
+                    let msg = "\(u.lastPathComponent): \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
+                    self.historico.atualizar(id) {
+                        $0.retomada?.saidas?[k] = ""          // "" = tentou e falhou
+                        $0.retomada?.falhas?.append(msg)
+                    }
                 }
             }
+            let fim = self.historico.item(id)?.retomada
+            let nomes = (fim?.saidas ?? []).compactMap { $0 }.filter { !$0.isEmpty }
+            let falhas = fim?.falhas ?? []
             if nomes.isEmpty { throw ErroApp(falhas.first ?? "Nenhuma imagem convertida.") }
-            self.historico.atualizar(id) { $0.origens = origens }
             self.concluir(id, arquivos: nomes,
                           resumo: falhas.isEmpty ? nil : "Não converti \(falhas.count): " + falhas.joined(separator: "; "),
                           inicio: inicio)
-            arquivos.forEach { try? FileManager.default.removeItem(at: $0) }
         }
     }
 
@@ -389,7 +609,7 @@ final class Estudio {
         let id = novoItem(modo == "video" ? .video : .audio, info.titulo, nuvem: true, mensagem: "Pedindo à nuvem",
                           base: personalizado ? base : nil)
         let inicio = Date()
-        rodar(id) {
+        rodar(id, segundoPlano: modo == "video" ? "Baixando vídeo pela nuvem" : "Baixando áudio pela nuvem") {
             let job = try await self.nuvem.iniciarLink(info.link, modo: modo, idioma: self.idioma, titulo: info.titulo)
             self.historico.atualizar(id) { $0.trabalho = job }
             let r = try await self.nuvem.aguardar(job) { m in Task { @MainActor in self.etapa(id, m) } }
@@ -407,7 +627,7 @@ final class Estudio {
         let base = PadraoNome.base(info.titulo, padrao: padrao, data: Date())
         let id = novoItem(.transcricao, info.titulo, nuvem: naNuvem, mensagem: "Pedindo à nuvem", base: base)
         let inicio = Date()
-        rodar(id) {
+        rodar(id, segundoPlano: naNuvem ? "Transcrição na nuvem" : nil, recomecar: !naNuvem) {
             if naNuvem {
                 let job = try await self.nuvem.iniciarLink(info.link, modo: "transcribe", idioma: idioma, titulo: info.titulo)
                 self.historico.atualizar(id) { $0.trabalho = job }
@@ -423,6 +643,7 @@ final class Estudio {
                     Task { @MainActor in self.etapa(id, "Baixando o áudio", p) }
                 }
                 defer { try? FileManager.default.removeItem(at: audio) }
+                try await self.aguardarVez(id)
                 let segs = try await TranscritorLocal.shared.transcrever(
                     audio, modelo: self.modeloLocal, idioma: idioma == "auto" ? nil : idioma
                 ) { msg, p in Task { @MainActor in self.etapa(id, msg, p) } }
@@ -460,6 +681,13 @@ final class Estudio {
                         self.concluir(id, arquivos: [u.lastPathComponent], inicio: inicio)
                     }
                 }
+            } else if !i.naNuvem, i.retomada != nil, Trabalhos.existe(i.id) {
+                historico.atualizar(i.id) {
+                    $0.estado = .erro
+                    $0.mensagem = "Interrompido: o app foi fechado. Toque em Continuar."
+                    $0.progresso = nil
+                }
+                interrompidos.append(i.id)
             } else {
                 historico.atualizar(i.id) {
                     $0.estado = .erro

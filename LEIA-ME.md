@@ -3,7 +3,7 @@
 App de iPhone que junta o whisper.frx9.com e o ConversorMidia: baixar links (YouTube, Instagram…),
 transcrever (texto `.txt` + legenda `.srt`) e tratar voz. Liquid Glass, tema escuro, iOS 26+.
 
-## O que roda onde (versão 0.5)
+## O que roda onde (versão 0.6)
 
 | Função | No iPhone | Na nuvem |
 |---|---|---|
@@ -59,6 +59,18 @@ nada muda no servidor. A senha fica no Keychain do iPhone para renovar a sessão
 - HDR do iPhone: a caixa `amve` (ambiente de visualização, luz em que foi gravado) é copiada
   do original para o codificador. Sem ela o iOS mostra o HLG com brilho diferente. O Dolby
   Vision (RPU) é refeito pelo codificador a partir dos quadros: valores próximos, não idênticos.
+
+## Fora da tela e retomada (0.6)
+
+- A GPU do iPhone não roda em segundo plano (no iOS 26 só o iPad tem). Por isso voz, vídeo e
+  transcrição **pausam** quando o app sai da tela; uma notificação avisa para voltar. Enquanto
+  algo roda no iPhone, uma faixa no topo pede para não trocar de app e a tela não apaga sozinha.
+- Imagens e trabalhos na nuvem usam a tarefa contínua do iOS 26 (`App/Motor/SegundoPlano.swift`):
+  seguem fora da tela, com o progresso na Atividade ao Vivo.
+- A entrada de cada trabalho no iPhone fica em `Application Support/Trabalhos/<id>` até terminar.
+  Se o app for fechado: ao abrir, "Continuar". Voz continua do último bloco de 5 min pronto
+  (ponto de retomada em `mv_pipeline.c`, resultado idêntico bit a bit ao de uma execução sem
+  parar — conferido); imagens pulam as prontas; vídeo e transcrição recomeçam.
 
 ## Nome de saída
 

@@ -217,9 +217,23 @@ private let cInferir: MVInferir = { ctx, modelo, entrada, saida in
     let h = Unmanaged<HostVoz>.fromOpaque(ctx).takeUnretainedValue()
     let primeira = !h.modelosVistos.contains(modelo)
     if primeira { h.modelosVistos.insert(modelo); Diagnostico.log("modelo \(modelo): abrindo e rodando a 1ª vez") }
+    // fora da tela o tratamento pausa aqui (a GPU do iPhone não roda em segundo plano)
+    if !EstadoApp.shared.ativo {
+        Diagnostico.log("app fora da tela: pausado")
+        EstadoApp.shared.esperarAtivo()
+        Diagnostico.log("app de volta: continuando")
+    }
     if let cm = h.coreml, h.usarCoreML[Int(modelo)] {
+        let geracao = EstadoApp.shared.geracao
         do {
-            try cm.inferir(Int(modelo), entrada, saida)
+            do {
+                try cm.inferir(Int(modelo), entrada, saida)
+            } catch where EstadoApp.shared.geracao != geracao || !EstadoApp.shared.ativo {
+                // o app saiu da tela no meio da conta: espera voltar e refaz o bloco na GPU
+                Diagnostico.log("modelo \(modelo): GPU interrompida ao sair da tela; refazendo ao voltar")
+                EstadoApp.shared.esperarAtivo()
+                try cm.inferir(Int(modelo), entrada, saida)
+            }
             if primeira {
                 Diagnostico.log("modelo \(modelo): 1ª inferência na GPU ok")
                 if HostVoz.conferencia(modelo).feita {
@@ -272,7 +286,9 @@ enum VozLocal {
     }
 
     /// Trata `arquivo` e grava os MP3 em `pasta`. Devolve os nomes (mix, voz, trilha).
-    static func tratar(_ arquivo: URL, opcoes: OpcoesVozLocal, pasta: URL, base: String,
+    /// trabalho: pasta dos intermediários (entrada decodificada, blocos prontos, ponto de retomada).
+    /// Se já tiver um trabalho começado lá, continua de onde parou.
+    static func tratar(_ arquivo: URL, opcoes: OpcoesVozLocal, pasta: URL, base: String, trabalho: URL,
                        progresso: @escaping @Sendable (String, Double?) -> Void) async throws -> (arquivos: [String], duracao: Double) {
         Diagnostico.iniciar()
         Diagnostico.log("arquivo: \(arquivo.lastPathComponent), modo \(opcoes.voz.modo.rawValue), eco \(opcoes.voz.eco), clareza \(opcoes.voz.clareza), quadra \(opcoes.quadra)")
@@ -283,15 +299,23 @@ enum VozLocal {
         }
         try Task.checkCancellation()
 
-        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("voz-" + UUID().uuidString, isDirectory: true)
+        let tmp = trabalho
         try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tmp) }
 
-        progresso("Lendo o áudio", nil)
         let entrada = tmp.appendingPathComponent("entrada.f32")
-        Diagnostico.log("modelos prontos; lendo o áudio")
-        let quadros = try await LeitorAudio.lerEstereo441(arquivo, para: entrada)
-        Diagnostico.log(String(format: "áudio lido: %.1f s", Double(quadros) / 44100))
+        let marca = tmp.appendingPathComponent("entrada.ok")      // guarda o nº de quadros: a leitura terminou
+        let quadros: Int
+        if let t = try? String(contentsOf: marca, encoding: .utf8), let q = Int(t),
+           FileManager.default.fileExists(atPath: entrada.path) {
+            quadros = q
+            Diagnostico.log(String(format: "continuando um trabalho começado: áudio de %.1f s já lido", Double(q) / 44100))
+        } else {
+            progresso("Lendo o áudio", nil)
+            Diagnostico.log("modelos prontos; lendo o áudio")
+            quadros = try await LeitorAudio.lerEstereo441(arquivo, para: entrada)
+            try String(quadros).write(to: marca, atomically: true, encoding: .utf8)
+            Diagnostico.log(String(format: "áudio lido: %.1f s", Double(quadros) / 44100))
+        }
         try Task.checkCancellation()
 
         let v = opcoes.voz

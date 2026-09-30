@@ -10,6 +10,8 @@
 #include <string.h>
 #include <stdarg.h>
 #include <unistd.h>
+#include <stdint.h>
+#include <sys/types.h>
 
 #define SR 44100
 #define ALVO_LUFS (-16.0)
@@ -125,20 +127,88 @@ static int em_fechar(Emendador *e) {
     return r;
 }
 
+/* ------------------------------------------------------------------ ponto de retomada
+   Depois de cada bloco: os arquivos de saída vão para o disco e o ponto guarda quantos bytes
+   eles têm e a "cauda" da emenda. Se o app for fechado, a etapa continua do bloco seguinte,
+   com o mesmo resultado de uma execução sem parar. */
+#define PONTO_MAGICO 0x4D565054u   /* "MVPT" */
+typedef struct {
+    uint32_t magico;
+    int32_t nb, feito, completo, nsaidas;
+    int32_t tem_cauda[2];
+    int64_t bytes[2];
+    int64_t F;
+} Ponto;
+
+static int ponto_ler(const char *p, Ponto *pt, float *caudas, size_t F) {
+    FILE *f = fopen(p, "rb");
+    if (!f) return -1;
+    int r = fread(pt, sizeof *pt, 1, f) == 1 && pt->magico == PONTO_MAGICO && pt->F == (int64_t)F
+            && pt->nsaidas >= 1 && pt->nsaidas <= 2 ? 0 : -1;
+    if (!r && !pt->completo && fread(caudas, sizeof(float), (size_t)pt->nsaidas * 2 * F, f) != (size_t)pt->nsaidas * 2 * F) r = -1;
+    fclose(f);
+    return r;
+}
+
+static int ponto_gravar(const char *p, const Ponto *pt, const float *caudas, size_t F) {
+    size_t n = strlen(p);
+    char *tmp = malloc(n + 5);
+    if (!tmp) return -2;
+    memcpy(tmp, p, n); memcpy(tmp + n, ".tmp", 5);
+    FILE *f = fopen(tmp, "wb");
+    int r = f ? 0 : -4;
+    if (!r && fwrite(pt, sizeof *pt, 1, f) != 1) r = -4;
+    if (!r && caudas && fwrite(caudas, sizeof(float), (size_t)pt->nsaidas * 2 * F, f) != (size_t)pt->nsaidas * 2 * F) r = -4;
+    if (f) { fflush(f); fsync(fileno(f)); if (fclose(f) != 0 && !r) r = -4; }
+    if (!r && rename(tmp, p) != 0) r = -4;
+    free(tmp);
+    return r;
+}
+
+/* reabre uma saída já começada: corta no último bloco confirmado e restaura a cauda */
+static int em_retomar(Emendador *e, const char *caminho, size_t F, int64_t bytes, const float *cauda, int tem_cauda) {
+    memset(e, 0, sizeof *e);
+    e->F = F;
+    if (truncate(caminho, (off_t)bytes) != 0) return -4;
+    e->f = fopen(caminho, "ab");
+    e->cauda = malloc(sizeof(float) * 2 * F);
+    if (!e->f || !e->cauda) return -4;
+    memcpy(e->cauda, cauda, sizeof(float) * 2 * F);
+    e->tem_cauda = tem_cauda;
+    return 0;
+}
+
 /* funcao(ctx, seg planar [2][len], len, saidas planar [nsaidas][2][len]) */
 typedef int (*FuncBloco)(void *ctx, const float *seg, size_t len, float **saidas, int i);
 
+/* ponto: arquivo do ponto de retomada desta etapa (NULL = sem retomada) */
 static int por_blocos(const char *entrada, size_t n, const char **saidas, int nsaidas,
-                      const Bloco *blocos, int nb, FuncBloco funcao, void *ctx) {
+                      const Bloco *blocos, int nb, FuncBloco funcao, void *ctx, const char *ponto) {
     const size_t C = (size_t)(CONTEXTO_SEG * SR), F = (size_t)(TRANSICAO_SEG * SR);
     Emendador em[2];
-    float *seg = NULL, *out[2] = {NULL, NULL};
-    int r = 0, abertos = 0;
+    float *seg = NULL, *out[2] = {NULL, NULL}, *caudas = NULL;
+    int r = 0, abertos = 0, inicio = 0;
+    Ponto pt;
+    memset(&pt, 0, sizeof pt);
+    if (ponto) {
+        caudas = malloc(sizeof(float) * 2 * 2 * F);
+        if (!caudas) return -2;
+        if (ponto_ler(ponto, &pt, caudas, F) == 0 && pt.nb == nb && pt.nsaidas == nsaidas) {
+            if (pt.completo) { free(caudas); return 0; }          /* etapa já pronta */
+            inicio = pt.feito + 1;
+        } else {
+            memset(&pt, 0, sizeof pt);
+            inicio = 0;
+        }
+    }
     FILE *f = fopen(entrada, "rb");
-    if (!f) return -4;
-    for (; abertos < nsaidas; abertos++)
-        if ((r = em_abrir(&em[abertos], saidas[abertos], F)) != 0) { abertos++; goto fim; }
-    for (int i = 0; i < nb; i++) {
+    if (!f) { free(caudas); return -4; }
+    for (; abertos < nsaidas; abertos++) {
+        r = inicio > 0 ? em_retomar(&em[abertos], saidas[abertos], F, pt.bytes[abertos], caudas + (size_t)abertos * 2 * F, pt.tem_cauda[abertos])
+                       : em_abrir(&em[abertos], saidas[abertos], F);
+        if (r != 0) { abertos++; goto fim; }
+    }
+    for (int i = inicio; i < nb; i++) {
         int ultimo = i == nb - 1;
         size_t s = blocos[i].ini, e = blocos[i].fim;
         size_t a = s > C ? s - C : 0, b = e + C < n ? e + C : n, len = b - a;
@@ -154,11 +224,27 @@ static int por_blocos(const char *entrada, size_t n, const char **saidas, int ns
             if ((r = em_gravar(&em[k], out[k], len, lo - a, hi - lo, ultimo)) != 0) goto fim;
             free(out[k]); out[k] = NULL;
         }
+        if (ponto && !ultimo) {
+            pt.magico = PONTO_MAGICO; pt.nb = nb; pt.feito = i; pt.completo = 0; pt.nsaidas = nsaidas; pt.F = (int64_t)F;
+            for (int k = 0; k < nsaidas; k++) {
+                if (fflush(em[k].f) != 0) { r = -4; goto fim; }
+                fsync(fileno(em[k].f));
+                pt.bytes[k] = (int64_t)ftello(em[k].f);
+                pt.tem_cauda[k] = em[k].tem_cauda;
+                memcpy(caudas + (size_t)k * 2 * F, em[k].cauda, sizeof(float) * 2 * F);
+            }
+            if ((r = ponto_gravar(ponto, &pt, caudas, F)) != 0) goto fim;
+        }
     }
 fim:
     free(seg); free(out[0]); free(out[1]);
     for (int k = 0; k < abertos; k++) { int r2 = em_fechar(&em[k]); if (!r) r = r2; }
     fclose(f);
+    if (!r && ponto) {
+        pt.magico = PONTO_MAGICO; pt.nb = nb; pt.feito = nb - 1; pt.completo = 1; pt.nsaidas = nsaidas; pt.F = (int64_t)F;
+        r = ponto_gravar(ponto, &pt, NULL, F);
+    }
+    free(caudas);
     return r;
 }
 
@@ -350,6 +436,8 @@ int mv_tratar(const char *entrada_f32, const char *pasta_tmp,
     char *f_tri = juntar(pasta_tmp, "/trilha.f32");
     char *f_voz = juntar(pasta_tmp, "/voz.f32");
     char *f_voz_f = juntar(pasta_tmp, "/voz_filtrada.f32");
+    char *p_sep = juntar(pasta_tmp, "/ponto_separacao.bin");
+    char *p_eco = juntar(pasta_tmp, "/ponto_eco.bin");
     char *o_voz = NULL, *o_tri = NULL, *o_mix = NULL;
     if (saida_f32_prefixo) {
         o_voz = juntar(saida_f32_prefixo, "voz.f32");
@@ -377,7 +465,7 @@ int mv_tratar(const char *entrada_f32, const char *pasta_tmp,
         fclose(f); free(buf);
         cm.pico = pico;
         const char *said[2] = { f_voz_orig, f_tri };
-        if ((r = por_blocos(entrada_f32, n, said, 2, blocos, nb, bloco_separar, &cm)) != 0) goto fim;
+        if ((r = por_blocos(entrada_f32, n, said, 2, blocos, nb, bloco_separar, &cm, p_sep)) != 0) goto fim;
         voz_orig = f_voz_orig; tri = f_tri;
     } else {
         voz_orig = entrada_f32;
@@ -404,7 +492,7 @@ int mv_tratar(const char *entrada_f32, const char *pasta_tmp,
             if (r) goto fim;
         }
         const char *said[1] = { f_voz };
-        if ((r = por_blocos(voz_orig, n, said, 1, blocos, nb, bloco_eco, &cm)) != 0) goto fim;
+        if ((r = por_blocos(voz_orig, n, said, 1, blocos, nb, bloco_eco, &cm, p_eco)) != 0) goto fim;
         voz = f_voz;
     } else {
         voz = voz_orig;
@@ -415,7 +503,7 @@ int mv_tratar(const char *entrada_f32, const char *pasta_tmp,
     if (host.progresso) host.progresso(host.ctx, 3, 0);
     double lv_bruto, lv = 0, lo = 0;
     if ((r = filtrar_voz(voz, f_voz_f, &op, &lv_bruto)) != 0) goto fim;
-    if (voz != voz_orig) remove(voz);
+    /* (voz.f32 fica até o fim: se o app for fechado depois daqui, a retomada ainda precisa dele) */
     int tem_lv = lufs_lido(lv_bruto, &lv);
     int tem_lo = 0;
     if (tri) {
@@ -471,10 +559,15 @@ fim:
     if (fv) fclose(fv);
     if (ft) fclose(ft);
     free(bv); free(bt); free(seg); free(blocos);
-    if (f_voz_orig) remove(f_voz_orig);
-    if (f_tri) remove(f_tri);
-    if (f_voz) remove(f_voz);
-    if (f_voz_f) remove(f_voz_f);
+    /* intermediários só saem quando deu certo: interrompido, eles servem para continuar */
+    if (r == 0) {
+        if (f_voz_orig) remove(f_voz_orig);
+        if (f_tri) remove(f_tri);
+        if (f_voz) remove(f_voz);
+        if (f_voz_f) remove(f_voz_f);
+        if (p_sep) remove(p_sep);
+        if (p_eco) remove(p_eco);
+    }
     if (r && erro && nerro > 0 && !erro[0]) {
         if (r == 1) falha(erro, nerro, "cancelado");
         else if (r == -2) falha(erro, nerro, "memória insuficiente");
@@ -483,7 +576,7 @@ fim:
         else if (r == -5) falha(erro, nerro, "falha ao gravar o MP3");
         else falha(erro, nerro, "erro %d", r);
     }
-    free(f_voz_orig); free(f_tri); free(f_voz); free(f_voz_f);
+    free(f_voz_orig); free(f_tri); free(f_voz); free(f_voz_f); free(p_sep); free(p_eco);
     free(o_voz); free(o_tri); free(o_mix);
     return r;
 }

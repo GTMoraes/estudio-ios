@@ -22,6 +22,7 @@ struct Item: Codable, Identifiable, Equatable {
     var baseSaida: String?            // nome de saída escolhido (padrão de nome), para retomar da nuvem
     var origens: [String: OrigemImagem]?   // imagens: arquivo convertido -> como era o original
     var origemMidia: OrigemMidia?          // conversão de vídeo: como era o original
+    var retomada: Retomada?                // trabalho no iPhone: o que é preciso para continuar
 
     var pasta: URL { Historico.pastaResultados.appendingPathComponent(id.uuidString, isDirectory: true) }
     func url(_ nome: String) -> URL { pasta.appendingPathComponent(nome) }
@@ -45,6 +46,24 @@ struct OrigemImagem: Codable, Equatable {
     var bytes: Int64
     var tipo: String?
     var data: Date?
+}
+
+/// Tudo o que um trabalho no iPhone precisa para ser continuado depois que o app foi fechado.
+/// A entrada fica em Trabalhos/<id>/entrada (ver SegundoPlano.swift).
+struct Retomada: Codable, Equatable {
+    enum Tipo: String, Codable { case voz, conversao, imagens, transcricao }
+    var tipo: Tipo
+    var entradas: [String]            // nomes dentro de Trabalhos/<id>/entrada
+    var nome: String                  // nome do arquivo original
+    var base: String?                 // nome de saída já resolvido
+    var data: Date?
+    var voz: OpcoesVoz?
+    var quadra: Bool?
+    var conversao: OpcoesConversao?
+    var imagem: OpcoesImagem?
+    var idioma: String?
+    var saidas: [String?]?            // imagens: nome gravado de cada entrada (nil = falta fazer)
+    var falhas: [String]?
 }
 
 /// Como era o vídeo original (para comparar na tela de detalhes; o original é apagado).
@@ -104,6 +123,7 @@ final class Historico {
     func remover(_ id: UUID) {
         guard let i = item(id) else { return }
         try? FileManager.default.removeItem(at: i.pasta)
+        Trabalhos.apagar(id)
         itens.removeAll { $0.id == id }
         salvar()
     }

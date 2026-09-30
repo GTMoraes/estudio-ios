@@ -109,6 +109,14 @@ struct DetalheView: View {
                             }
                         } else if item.estado == .erro {
                             Label(item.mensagem ?? "Erro", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
+                            if item.retomada != nil, !estudio.rodando(id) {
+                                Button { estudio.continuar(id) } label: {
+                                    Label("Continuar", systemImage: "play.fill").frame(maxWidth: .infinity).padding(.vertical, 4)
+                                }
+                                .buttonStyle(.glassProminent)
+                                Text("Continua de onde parou, com os mesmos ajustes.")
+                                    .font(.caption).foregroundStyle(Tema.texto2)
+                            }
                         }
                     }
 
@@ -140,11 +148,7 @@ struct DetalheView: View {
                         }
                         if item.tipo == .transcricao, let t = texto {
                             Cartao(titulo: "Texto", icone: "text.quote") {
-                                Button { UIPasteboard.general.string = t; aviso = "Texto copiado." } label: {
-                                    Label("Copiar tudo", systemImage: "doc.on.doc")
-                                }
-                                .buttonStyle(.glass)
-                                Text(t).font(.body).textSelection(.enabled)
+                                CaixaTexto(texto: t) { UIPasteboard.general.string = t; aviso = "Texto copiado." }
                             }
                         }
                     }
@@ -238,8 +242,9 @@ struct LinhaArquivo: View {
                         .foregroundStyle(Tema.acento)
                 }
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(url.lastPathComponent).font(.subheadline).lineLimit(2)
-                    if let t = tamanho { Text(t).font(.caption).foregroundStyle(Tema.texto2) }
+                    Text(url.lastPathComponent).font(.subheadline).lineLimit(2).truncationMode(.middle)
+                    Text([ext.isEmpty ? nil : ext.uppercased(), tamanho].compactMap { $0 }.joined(separator: " · "))
+                        .font(.caption.weight(.medium)).foregroundStyle(Tema.texto2)
                 }
                 Spacer()
                 if ehAudio {
@@ -342,5 +347,73 @@ struct LinhaArquivo: View {
                 }
             }
         }
+    }
+}
+
+
+/// Texto da transcrição: caixa de altura limitada (rola por dentro), "Ver mais" abre inteira.
+/// Dá para selecionar trechos (UITextView: o Text do SwiftUI só copia o bloco todo).
+struct CaixaTexto: View {
+    let texto: String
+    var copiar: () -> Void
+    @State private var expandido = false
+    @State private var alturaTotal: CGFloat = 0
+    private let alturaCaixa: CGFloat = 260
+
+    var body: some View {
+        TextoSelecionavel(texto: texto, expandido: expandido, alturaMax: alturaCaixa, alturaTotal: $alturaTotal)
+            .padding(12)
+            .background(.white.opacity(0.05), in: .rect(cornerRadius: 14))
+        HStack(spacing: 10) {
+            Button(action: copiar) { Label("Copiar tudo", systemImage: "doc.on.doc") }
+                .buttonStyle(.glass)
+            Spacer()
+            if alturaTotal > alturaCaixa + 1 {
+                Button { withAnimation(.snappy) { expandido.toggle() } } label: {
+                    Label(expandido ? "Ver menos" : "Ver mais", systemImage: expandido ? "chevron.up" : "chevron.down")
+                }
+                .buttonStyle(.glass)
+            }
+        }
+        Text("Toque e segure para selecionar um trecho.").font(.caption).foregroundStyle(Tema.texto2)
+    }
+}
+
+struct TextoSelecionavel: UIViewRepresentable {
+    let texto: String
+    let expandido: Bool
+    let alturaMax: CGFloat
+    @Binding var alturaTotal: CGFloat
+
+    func makeUIView(context: Context) -> UITextView {
+        let v = UITextView()
+        v.isEditable = false
+        v.isSelectable = true
+        v.backgroundColor = .clear
+        v.textColor = .label
+        v.font = .preferredFont(forTextStyle: .body)
+        v.adjustsFontForContentSizeCategory = true
+        v.textContainerInset = .zero
+        v.textContainer.lineFragmentPadding = 0
+        v.dataDetectorTypes = []
+        v.text = texto
+        v.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        v.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return v
+    }
+
+    func updateUIView(_ v: UITextView, context: Context) {
+        if v.text != texto { v.text = texto }
+        v.isScrollEnabled = !expandido
+        if !expandido { v.flashScrollIndicators() }
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView v: UITextView, context: Context) -> CGSize? {
+        let w = proposal.width ?? v.window?.bounds.width ?? 350
+        let total = ceil(v.sizeThatFits(CGSize(width: w, height: .greatestFiniteMagnitude)).height)
+        if abs(total - alturaTotal) > 0.5 {
+            DispatchQueue.main.async { alturaTotal = total }
+        }
+        return CGSize(width: w, height: expandido ? total : min(total, alturaMax))
     }
 }

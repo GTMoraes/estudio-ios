@@ -64,7 +64,20 @@ actor TranscritorLocal {
                                              progressCallback: { p in progresso(p.fractionCompleted) })
     }
 
+    /// Carregamento em andamento: um ator pode ser reentrado a cada `await`, e dois pedidos
+    /// ao mesmo tempo baixavam o tokenizer juntos (um apagava o arquivo do outro).
+    private var carregando: (id: String, tarefa: Task<WhisperKit, Error>)?
+
     private func preparar(_ id: String, avisar: @escaping @Sendable (String, Double?) -> Void) async throws -> WhisperKit {
+        if let w = whisper, carregado == id { return w }
+        if let c = carregando, c.id == id { return try await c.tarefa.value }
+        let t = Task { try await self.carregar(id, avisar: avisar) }
+        carregando = (id, t)
+        defer { if carregando?.id == id { carregando = nil } }
+        return try await t.value
+    }
+
+    private func carregar(_ id: String, avisar: @escaping @Sendable (String, Double?) -> Void) async throws -> WhisperKit {
         if let w = whisper, carregado == id { return w }
         whisper = nil
         avisar("Baixando o modelo (só na primeira vez)", 0)
