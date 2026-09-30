@@ -34,6 +34,7 @@ struct AjustesView: View {
                         }
                         .pickerStyle(.segmented)
                     }
+                    CartaoPreparar()
                     modeloLocalCartao
                     vozCartao
                     Cartao(titulo: "Sobre", icone: "info.circle") {
@@ -199,6 +200,70 @@ struct AjustesView: View {
                     .font(.footnote)
                 }
             }
+        }
+    }
+}
+
+
+/// Baixa e compila de antemão o que o iPhone usa, para o 1º trabalho não esperar minutos.
+struct CartaoPreparar: View {
+    @Environment(Estudio.self) private var estudio
+    @State private var prep = Preparacao.shared
+
+    var body: some View {
+        Cartao(titulo: "Deixar o app pronto", icone: "bolt.badge.checkmark") {
+            Text("Baixa e compila agora o que o app usa no iPhone, para o primeiro trabalho começar na hora. Depois de instalar uma versão nova do app (ou atualizar o iOS), as compilações precisam ser refeitas.")
+                .font(.footnote).foregroundStyle(Tema.texto2)
+            ForEach(Preparacao.Parte.allCases) { p in linha(p) }
+            BotaoPrincipal(titulo: prep.ocupado ? "Preparando…" : prep.tudoPronto ? "Tudo pronto" : "Preparar tudo",
+                           icone: prep.tudoPronto ? "checkmark.circle.fill" : "bolt.fill",
+                           desativado: prep.ocupado || prep.tudoPronto || estudio.processandoLocal) {
+                prep.preparar(Preparacao.Parte.allCases)
+            }
+            if estudio.processandoLocal && !prep.tudoPronto {
+                Text("Espere o trabalho atual terminar.").font(.footnote).foregroundStyle(Tema.texto2)
+            } else if prep.ocupado {
+                Text("Mantenha o app aberto até terminar. De preferência no Wi-Fi.").font(.footnote).foregroundStyle(.yellow)
+            }
+        }
+    }
+
+    @ViewBuilder private func linha(_ p: Preparacao.Parte) -> some View {
+        let pronto = prep.pronto(p)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: pronto ? "checkmark.circle.fill" : "circle.dashed")
+                    .foregroundStyle(pronto ? .green : Tema.texto2)
+                    .font(.title3)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(prep.titulo(p)).font(.subheadline.weight(.semibold))
+                    Text(textoEstado(p)).font(.caption).foregroundStyle(pronto ? .green : Tema.texto2)
+                }
+                Spacer(minLength: 8)
+                if !pronto && prep.andamento[p] == nil {
+                    Button("Preparar") { prep.preparar([p]) }
+                        .buttonStyle(.glass)
+                        .font(.footnote)
+                        .disabled(prep.ocupado || estudio.processandoLocal)
+                }
+            }
+            if let a = prep.andamento[p] {
+                if let f = a.fracao { ProgressView(value: f).tint(Tema.acento) }
+                else { ProgressView().progressViewStyle(.linear).tint(Tema.acento) }
+                Text(a.mensagem).font(.caption).foregroundStyle(Tema.texto2)
+            }
+            if let e = prep.erro[p] {
+                Label(e, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.yellow)
+            }
+        }
+        .padding(12)
+        .background(.white.opacity(0.05), in: .rect(cornerRadius: 14))
+    }
+
+    private func textoEstado(_ p: Preparacao.Parte) -> String {
+        switch prep.estado(p) {
+        case .pronto: return "Pronto"
+        case .falta(let m): return m + " · " + prep.detalhe(p)
         }
     }
 }

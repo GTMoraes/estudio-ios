@@ -3,7 +3,7 @@
 App de iPhone que junta o whisper.frx9.com e o ConversorMidia: baixar links (YouTube, Instagram…),
 transcrever (texto `.txt` + legenda `.srt`) e tratar voz. Liquid Glass, tema escuro, iOS 26+.
 
-## O que roda onde (versão 0.6)
+## O que roda onde (versão 0.7)
 
 | Função | No iPhone | Na nuvem |
 |---|---|---|
@@ -71,6 +71,14 @@ nada muda no servidor. A senha fica no Keychain do iPhone para renovar a sessão
   Se o app for fechado: ao abrir, "Continuar". Voz continua do último bloco de 5 min pronto
   (ponto de retomada em `mv_pipeline.c`, resultado idêntico bit a bit ao de uma execução sem
   parar — conferido); imagens pulam as prontas; vídeo e transcrição recomeçam.
+
+## Deixar o app pronto (0.7)
+
+Ajustes › "Deixar o app pronto" (`App/Motor/Preparar.swift`): lista o que o iPhone precisa
+baixar/compilar (modelo de transcrição + compilação no Neural Engine; modelos de voz do
+processador; modelos de voz da GPU + preparação na GPU), com o estado de cada um e botões para
+preparar um ou todos. A compilação fica no cache do iOS e é refeita depois de instalar uma versão
+nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
 
 ## Nome de saída
 

@@ -84,8 +84,7 @@ actor TranscritorLocal {
         let pasta = try await baixar(id) { p in avisar("Baixando o modelo (só na primeira vez)", p) }
         // O iOS compila o modelo para o Neural Engine deste iPhone e guarda num cache; o cache
         // se perde quando o app é instalado/atualizado (muda a pasta do app) ou o iOS atualiza.
-        let chave = Self.chaveCompilacao(id)
-        let jaCompilado = UserDefaults.standard.string(forKey: "whisperCompilado") == chave
+        let jaCompilado = Self.compilado(id)
         avisar(jaCompilado ? "Carregando o modelo no Neural Engine"
                            : "Compilando o modelo para o Neural Engine deste iPhone: leva 3 a 4 min e só acontece depois de instalar ou atualizar o app (ou o iOS)", nil)
         // downloadBase também vira a pasta do tokenizer (sem ele, vai para Documentos/huggingface)
@@ -93,15 +92,20 @@ actor TranscritorLocal {
                                    verbose: false, logLevel: .error,
                                    prewarm: true, load: true, download: false)
         let w = try await WhisperKit(cfg)
-        UserDefaults.standard.set(chave, forKey: "whisperCompilado")
+        CacheCompilacao.marcar("whisper-" + id)
         whisper = w; carregado = id
         return w
     }
 
-    /// Muda quando o cache de compilação do iOS deixa de valer: outro modelo, app reinstalado
-    /// (a pasta do app muda a cada instalação) ou outra versão do iOS.
-    private static func chaveCompilacao(_ id: String) -> String {
-        [id, Bundle.main.bundleURL.path, ProcessInfo.processInfo.operatingSystemVersionString].joined(separator: "|")
+    /// Compilado para o Neural Engine desde a última instalação do app / atualização do iOS.
+    static func compilado(_ id: String) -> Bool { CacheCompilacao.feito("whisper-" + id) }
+
+    /// Ajustes › "Deixar o app pronto": baixa e compila agora, depois solta o modelo da memória
+    /// (a compilação fica no cache do iOS; carregar de novo leva segundos).
+    func prepararDeAntemao(_ id: String, avisar: @escaping @Sendable (String, Double?) -> Void) async throws {
+        let jaCarregado = whisper != nil && carregado == id
+        _ = try await preparar(id, avisar: avisar)
+        if !jaCarregado { whisper = nil; carregado = nil }
     }
 
     /// Transcreve um arquivo de áudio ou vídeo. idioma: "pt" ou nil (detectar).

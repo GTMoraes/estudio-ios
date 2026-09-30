@@ -148,6 +148,7 @@ final class MotorCoreML {
         let t0 = Date()
         let m = try MLModel(contentsOf: ModelosCoreML.compilado(ModelosCoreML.pacotes[i].nome), configuration: cfg)
         Diagnostico.log(String(format: "Core ML: modelo %d carregado em %.1f s", i, Date().timeIntervalSince(t0)))
+        CacheCompilacao.marcar("voz-gpu-" + ModelosCoreML.pacotes[i].nome)
         modelos[i] = m
         return m
     }
