@@ -415,8 +415,16 @@ struct CamadaGestos: UIViewRepresentable {
             if g.state == .ended { pai?.aoTocarDuas() }
         }
 
+        /// Pinça e arrastar juntos só entre os nossos gestos. Antes valia para qualquer gesto,
+        /// inclusive o da folha: arrastar a moldura arrastava a janela do editor junto.
         func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith outro: UIGestureRecognizer) -> Bool {
-            true
+            outro.view === g.view
+        }
+
+        /// Gestos de fora (o arrastar da folha, por exemplo) esperam os nossos falharem:
+        /// com o dedo na prévia, a janela não se mexe.
+        func gestureRecognizer(_ g: UIGestureRecognizer, shouldBeRequiredToFailBy outro: UIGestureRecognizer) -> Bool {
+            outro.view !== g.view
         }
     }
 }
