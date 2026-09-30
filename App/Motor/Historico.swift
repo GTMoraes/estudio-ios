@@ -23,6 +23,7 @@ struct Item: Codable, Identifiable, Equatable {
     var origens: [String: OrigemImagem]?   // imagens: arquivo convertido -> como era o original
     var origemMidia: OrigemMidia?          // conversão de vídeo: como era o original
     var retomada: Retomada?                // trabalho no iPhone: o que é preciso para continuar
+    var pedidoLink: PedidoLink?            // link: o pedido original, para "Tentar de novo"
 
     var pasta: URL { Historico.pastaResultados.appendingPathComponent(id.uuidString, isDirectory: true) }
     func url(_ nome: String) -> URL { pasta.appendingPathComponent(nome) }
@@ -64,6 +65,16 @@ struct Retomada: Codable, Equatable {
     var idioma: String?
     var saidas: [String?]?            // imagens: nome gravado de cada entrada (nil = falta fazer)
     var falhas: [String]?
+}
+
+/// Um pedido feito a partir de um link (baixar ou transcrever), guardado para repetir.
+struct PedidoLink: Codable, Equatable {
+    enum Acao: String, Codable { case video, audio, transcrever }
+    var info: InfoLink
+    var acao: Acao
+    var naNuvem: Bool
+    var idioma: String
+    var padrao: String
 }
 
 /// Como era o vídeo original (para comparar na tela de detalhes; o original é apagado).

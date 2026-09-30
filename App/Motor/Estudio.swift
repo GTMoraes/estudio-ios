@@ -326,6 +326,17 @@ final class Estudio {
         }
     }
 
+    /// Link que falhou: faz o mesmo pedido de novo (o item com erro sai da lista).
+    func tentarDeNovo(_ id: UUID) {
+        guard tarefas[id] == nil, let p = historico.item(id)?.pedidoLink else { return }
+        historico.remover(id)
+        switch p.acao {
+        case .video: baixarLink(p.info, modo: "video", padrao: p.padrao)
+        case .audio: baixarLink(p.info, modo: "audio", padrao: p.padrao)
+        case .transcrever: transcreverLink(p.info, naNuvem: p.naNuvem, idioma: p.idioma, padrao: p.padrao)
+        }
+    }
+
     func continuarInterrompidos() {
         let ids = interrompidos
         interrompidos = []
@@ -608,6 +619,9 @@ final class Estudio {
         let base = PadraoNome.base(info.titulo, padrao: padrao, data: Date())
         let id = novoItem(modo == "video" ? .video : .audio, info.titulo, nuvem: true, mensagem: "Pedindo à nuvem",
                           base: personalizado ? base : nil)
+        historico.atualizar(id) {
+            $0.pedidoLink = PedidoLink(info: info, acao: modo == "video" ? .video : .audio, naNuvem: true, idioma: self.idioma, padrao: padrao)
+        }
         let inicio = Date()
         rodar(id, segundoPlano: modo == "video" ? "Baixando vídeo pela nuvem" : "Baixando áudio pela nuvem") {
             let job = try await self.nuvem.iniciarLink(info.link, modo: modo, idioma: self.idioma, titulo: info.titulo)
@@ -626,6 +640,9 @@ final class Estudio {
     func transcreverLink(_ info: InfoLink, naNuvem: Bool, idioma: String, padrao: String = Renomear.padrao) {
         let base = PadraoNome.base(info.titulo, padrao: padrao, data: Date())
         let id = novoItem(.transcricao, info.titulo, nuvem: naNuvem, mensagem: "Pedindo à nuvem", base: base)
+        historico.atualizar(id) {
+            $0.pedidoLink = PedidoLink(info: info, acao: .transcrever, naNuvem: naNuvem, idioma: idioma, padrao: padrao)
+        }
         let inicio = Date()
         rodar(id, segundoPlano: naNuvem ? "Transcrição na nuvem" : nil, recomecar: !naNuvem) {
             if naNuvem {

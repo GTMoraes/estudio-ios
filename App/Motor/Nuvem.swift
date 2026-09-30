@@ -282,7 +282,7 @@ final class Nuvem: @unchecked Sendable {
     func tratamentosDeVoz() async throws -> [[String: Any]] { try await lista("api/voz") }
 }
 
-struct InfoLink: Equatable {
+struct InfoLink: Codable, Equatable {
     var titulo: String
     var autor: String
     var site: String

@@ -116,6 +116,13 @@ struct DetalheView: View {
                                 .buttonStyle(.glassProminent)
                                 Text("Continua de onde parou, com os mesmos ajustes.")
                                     .font(.caption).foregroundStyle(Tema.texto2)
+                            } else if item.pedidoLink != nil, !estudio.rodando(id) {
+                                Button { estudio.tentarDeNovo(id); voltar() } label: {
+                                    Label("Tentar de novo", systemImage: "arrow.clockwise").frame(maxWidth: .infinity).padding(.vertical, 4)
+                                }
+                                .buttonStyle(.glassProminent)
+                                Text("Pede o mesmo link de novo, com as mesmas opções.")
+                                    .font(.caption).foregroundStyle(Tema.texto2)
                             }
                         }
                     }

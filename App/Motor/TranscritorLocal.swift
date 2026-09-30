@@ -82,14 +82,26 @@ actor TranscritorLocal {
         whisper = nil
         avisar("Baixando o modelo (só na primeira vez)", 0)
         let pasta = try await baixar(id) { p in avisar("Baixando o modelo (só na primeira vez)", p) }
-        avisar("Preparando o modelo no Neural Engine (a 1ª vez demora alguns minutos)", nil)
+        // O iOS compila o modelo para o Neural Engine deste iPhone e guarda num cache; o cache
+        // se perde quando o app é instalado/atualizado (muda a pasta do app) ou o iOS atualiza.
+        let chave = Self.chaveCompilacao(id)
+        let jaCompilado = UserDefaults.standard.string(forKey: "whisperCompilado") == chave
+        avisar(jaCompilado ? "Carregando o modelo no Neural Engine"
+                           : "Compilando o modelo para o Neural Engine deste iPhone: leva 3 a 4 min e só acontece depois de instalar ou atualizar o app (ou o iOS)", nil)
         // downloadBase também vira a pasta do tokenizer (sem ele, vai para Documentos/huggingface)
         let cfg = WhisperKitConfig(model: id, downloadBase: Self.pastaModelos, modelFolder: pasta.path,
                                    verbose: false, logLevel: .error,
                                    prewarm: true, load: true, download: false)
         let w = try await WhisperKit(cfg)
+        UserDefaults.standard.set(chave, forKey: "whisperCompilado")
         whisper = w; carregado = id
         return w
+    }
+
+    /// Muda quando o cache de compilação do iOS deixa de valer: outro modelo, app reinstalado
+    /// (a pasta do app muda a cada instalação) ou outra versão do iOS.
+    private static func chaveCompilacao(_ id: String) -> String {
+        [id, Bundle.main.bundleURL.path, ProcessInfo.processInfo.operatingSystemVersionString].joined(separator: "|")
     }
 
     /// Transcreve um arquivo de áudio ou vídeo. idioma: "pt" ou nil (detectar).
