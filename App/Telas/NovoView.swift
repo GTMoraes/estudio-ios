@@ -16,7 +16,7 @@ struct NovoView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    Cartao(titulo: "Link do YouTube, Instagram…", icone: "link") {
+                    Cartao(titulo: "Link do YouTube, Instagram, Drive…", icone: "link") {
                         HStack(spacing: 10) {
                             TextField("Cole o link aqui", text: $link)
                                 .textInputAutocapitalization(.never)
@@ -35,7 +35,7 @@ struct NovoView: View {
                         }
                         BotaoPrincipal(titulo: "Continuar", icone: "arrow.right",
                                        desativado: link.trimmingCharacters(in: .whitespaces).isEmpty, acao: abrirLink)
-                        Text("O download dos links é feito pela nuvem; o arquivo pronto vem para o iPhone.")
+                        Text("Links do Google Drive abrem aqui mesmo, para navegar e escolher o que baixar. Os outros são baixados pela nuvem; o arquivo pronto vem para o iPhone.")
                             .font(.footnote).foregroundStyle(Tema.texto2)
                     }
 

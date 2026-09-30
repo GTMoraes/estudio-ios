@@ -24,6 +24,7 @@ struct AjustesView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     contaNuvem
+                    CartaoDrive()
                     Cartao(titulo: "Padrões", icone: "slider.horizontal.3") {
                         Toggle(isOn: $nuvemPorPadrao) { Label("Processar na nuvem", systemImage: "cloud.fill") }
                         Text("Vem marcado ao transcrever. Desmarcado, a transcrição roda no iPhone.")
@@ -264,6 +265,64 @@ struct CartaoPreparar: View {
         switch prep.estado(p) {
         case .pronto: return "Pronto"
         case .falta(let m): return m + " · " + prep.detalhe(p)
+        }
+    }
+}
+
+
+/// Chave de API do Google Drive (links públicos). Fica no Keychain do iPhone.
+struct CartaoDrive: View {
+    @State private var temChave = Drive.chave != nil
+    @State private var nova = ""
+    @State private var msg: String?
+    @State private var testando = false
+
+    var body: some View {
+        Cartao(titulo: "Google Drive", icone: "externaldrive.fill.badge.icloud") {
+            if temChave {
+                Label("Chave de API guardada no iPhone", systemImage: "checkmark.seal.fill").foregroundStyle(.green)
+                Text("Links públicos do Drive (\u{201C}qualquer pessoa com o link\u{201D}) abrem no app, com as pastas.")
+                    .font(.footnote).foregroundStyle(Tema.texto2)
+                HStack {
+                    Button { testar() } label: { Label(testando ? "Testando…" : "Testar", systemImage: "checkmark.circle") }
+                        .buttonStyle(.glass).disabled(testando)
+                    Spacer()
+                    Button("Apagar chave", role: .destructive) {
+                        Drive.apagarChave(); temChave = false; msg = nil
+                    }
+                    .buttonStyle(.glass)
+                }
+            } else {
+                Text("Cole a chave de API criada no Google Cloud (só com a Google Drive API liberada). Ela fica no Keychain do iPhone.")
+                    .font(.footnote).foregroundStyle(Tema.texto2)
+                SecureField("Chave de API (AIza…)", text: $nova)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .padding(12).background(.white.opacity(0.06), in: .rect(cornerRadius: 14))
+                HStack {
+                    Button("Colar", systemImage: "doc.on.clipboard") {
+                        if let s = UIPasteboard.general.string { nova = s.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    }
+                    .buttonStyle(.glass)
+                    Spacer()
+                    Button("Salvar", systemImage: "key.fill") {
+                        Drive.salvarChave(nova); nova = ""
+                        temChave = Drive.chave != nil
+                        if temChave { testar() } else { msg = "Não consegui guardar a chave." }
+                    }
+                    .buttonStyle(.glassProminent).tint(Tema.acento)
+                    .disabled(nova.trimmingCharacters(in: .whitespaces).count < 20)
+                }
+            }
+            if let msg { Text(msg).font(.footnote).foregroundStyle(Tema.texto2) }
+        }
+    }
+
+    private func testar() {
+        testando = true; msg = nil
+        Task {
+            do { try await Drive.testarChave(); msg = "A chave funciona." }
+            catch { msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription }
+            testando = false
         }
     }
 }

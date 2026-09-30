@@ -9,6 +9,7 @@ enum Entrada: Identifiable, Equatable {
     case arquivo(URL, nome: String)
     case imagens([URL])
     case videos([URL])            // vários áudios/vídeos: um lote do conversor
+    case drive(String)            // link do Google Drive
 
     var id: String {
         switch self {
@@ -16,6 +17,7 @@ enum Entrada: Identifiable, Equatable {
         case .arquivo(let u, _): return "arq:" + u.path
         case .imagens(let us): return "img:\(us.count):" + (us.first?.path ?? "")
         case .videos(let us): return "vid:\(us.count):" + (us.first?.path ?? "")
+        case .drive(let l): return "drive:" + l
         }
     }
 }
@@ -23,6 +25,10 @@ enum Entrada: Identifiable, Equatable {
 /// Arquivo de imagem? (pela extensão; HEIC, JPG, PNG, WebP, AVIF, TIFF…)
 func ehImagem(_ url: URL) -> Bool {
     UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) ?? false
+}
+
+func ehVideoArquivo(_ url: URL) -> Bool {
+    UTType(filenameExtension: url.pathExtension)?.conforms(to: .movie) ?? false
 }
 
 /// Estado do app e quem executa os trabalhos (no iPhone ou na nuvem).
@@ -53,6 +59,9 @@ final class Estudio {
     // MARK: - entradas
 
     func receber(_ e: Entrada) {
+        var e = e
+        // link do Google Drive: abre o navegador do Drive (não a nuvem)
+        if case .link(let l) = e, Drive.ehDrive(l) { e = .drive(l) }
         if entrada == nil { entrada = e } else { fila.append(e) }
     }
 
@@ -314,9 +323,10 @@ final class Estudio {
         }
         let locais = historico.itens.filter { !$0.naNuvem && $0.estado == .processando && tarefas[$0.id] != nil }
         guard !locais.isEmpty else { return }
-        let soImagens = locais.allSatisfy { $0.tipo == .imagem }
-        if soImagens { return }            // imagens seguem em segundo plano (Atividade ao Vivo)
-        for i in locais where i.tipo != .imagem {
+        // imagens e downloads do Drive seguem em segundo plano (Atividade ao Vivo)
+        let seguem: (Item) -> Bool = { $0.tipo == .imagem || $0.tipo == .drive }
+        if locais.allSatisfy(seguem) { return }
+        for i in locais where !seguem(i) {
             historico.atualizar(i.id, salvarAgora: false) { $0.mensagem = "Pausado: volte ao Estúdio para continuar" }
         }
         Notificacoes.avisar("Processamento pausado",
@@ -338,6 +348,7 @@ final class Estudio {
         case .imagens: executarImagens(id)
         case .transcricao: executarTranscricao(id)
         case .loteConversao: executarLote(id)
+        case .drive: executarDrive(id)
         }
     }
 
@@ -676,6 +687,89 @@ final class Estudio {
         }
     }
 
+    // --- Google Drive: baixar (direto do Google para o iPhone)
+
+    func baixarDrive(_ itens: [Drive.Item], titulo: String, converterDepois: Bool = false) {
+        let arquivos = itens.filter { !$0.ehPasta }
+        guard !arquivos.isEmpty else { return }
+        let id = novoItem(.drive, "Drive: " + titulo, nuvem: false, mensagem: "Baixando do Drive")
+        var r = Retomada(tipo: .drive, entradas: [], nome: titulo)
+        r.drive = arquivos
+        r.saidas = Array(repeating: nil, count: arquivos.count)
+        r.falhas = []
+        r.converterDepois = converterDepois
+        historico.atualizar(id) { $0.retomada = r }
+        // não há entrada local; a pasta de trabalho só marca que dá para continuar
+        try? FileManager.default.createDirectory(at: Trabalhos.entradas(id), withIntermediateDirectories: true)
+        executarDrive(id)
+    }
+
+    /// Um arquivo por vez; segue fora da tela (só rede). "Continuar" pula os já baixados.
+    private func executarDrive(_ id: UUID) {
+        guard let r0 = historico.item(id)?.retomada, let lista = r0.drive else { return }
+        let total = lista.count
+        let bytesTotal = lista.reduce(Int64(0)) { $0 + ($1.tamanho ?? 0) }
+        let inicio = Date()
+        rodar(id, segundoPlano: total == 1 ? "Baixando do Drive" : "Baixando \(total) arquivos do Drive") {
+            guard let item = self.historico.item(id) else { return }
+            try FileManager.default.createDirectory(at: item.pasta, withIntermediateDirectories: true)
+            var feitos: Int64 = lista.enumerated().reduce(0) { t, e in
+                let pronto = (r0.saidas?[e.offset] ?? nil).map { !$0.isEmpty } ?? false
+                return t + (pronto ? (e.element.tamanho ?? 0) : 0)
+            }
+            let fmt = ByteCountFormatter()
+            for (k, d) in lista.enumerated() {
+                try Task.checkCancellation()
+                guard let r = self.historico.item(id)?.retomada else { return }
+                if let feita = r.saidas?[k] ?? nil, !feita.isEmpty { continue }
+                let destino = Nuvem.semColisao(item.pasta.appendingPathComponent(Nuvem.limpar(d.nomeArquivo)))
+                let antes = feitos
+                do {
+                    try await Drive.baixar(d, para: destino) { b in
+                        Task { @MainActor in
+                            let agora = antes + b
+                            let frac = bytesTotal > 0 ? Double(agora) / Double(bytesTotal) : Double(k) / Double(total)
+                            self.etapa(id, "Baixando \(k + 1) de \(total) · \(fmt.string(fromByteCount: agora)) de \(fmt.string(fromByteCount: bytesTotal))", min(1, frac))
+                        }
+                    }
+                    feitos += d.tamanho ?? 0
+                    self.historico.atualizar(id) { $0.retomada?.saidas?[k] = destino.lastPathComponent }
+                } catch is CancellationError {
+                    try? FileManager.default.removeItem(at: destino)
+                    throw CancellationError()
+                } catch let e as URLError where e.code == .cancelled {
+                    try? FileManager.default.removeItem(at: destino)
+                    throw CancellationError()
+                } catch {
+                    try? FileManager.default.removeItem(at: destino)
+                    let msg = "\(d.nome): \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
+                    self.historico.atualizar(id) {
+                        $0.retomada?.saidas?[k] = ""
+                        $0.retomada?.falhas?.append(msg)
+                    }
+                }
+            }
+            let fim = self.historico.item(id)?.retomada
+            let nomes = (fim?.saidas ?? []).compactMap { $0 }.filter { !$0.isEmpty }
+            let falhas = fim?.falhas ?? []
+            let converter = fim?.converterDepois ?? false
+            if nomes.isEmpty { throw ErroApp(falhas.first ?? "Nada foi baixado.") }
+            self.concluir(id, arquivos: nomes,
+                          resumo: falhas.isEmpty ? "\(fmt.string(fromByteCount: feitos)) · baixado em \(formatarDuracao(Date().timeIntervalSince(inicio)) ?? "—")"
+                                                 : "Não baixei \(falhas.count): " + falhas.joined(separator: "; "),
+                          inicio: inicio)
+            if converter, let it = self.historico.item(id) {
+                // só fotos, vídeos e áudios vão para o conversor
+                let midias = lista.enumerated().compactMap { e -> URL? in
+                    guard let n = fim?.saidas?[e.offset] ?? nil, !n.isEmpty,
+                          e.element.ehMidia || e.element.mime.hasPrefix("audio/") else { return nil }
+                    return it.url(n)
+                }
+                if !midias.isEmpty { self.importarVarios(midias) }
+            }
+        }
+    }
+
     // --- imagens (no iPhone)
 
     func converterImagens(_ arquivos: [URL], opcoes: OpcoesImagem) {
@@ -823,7 +917,7 @@ final class Estudio {
                     switch tipo {
                     case .transcricao: try await self.guardarTranscricaoDaNuvem(id, r, base: base, inicio: inicio)
                     case .voz: try await self.guardarVozDaNuvem(id, r, inicio: inicio, base: personalizado ? base : nil)
-                    case .imagem: break           // imagens nunca vão para a nuvem
+                    case .imagem, .drive: break   // imagens e Drive nunca vão para a nuvem
                     case .video, .audio:
                         guard let tid = r["id"] as? Int, let item = self.historico.item(id) else { throw ErroApp("Resposta incompleta da nuvem.") }
                         let modo = tipo == .video ? "video" : "audio"

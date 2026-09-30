@@ -103,6 +103,19 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
   informações × original por arquivo (`Item.origensMidia`). Fora da tela: espera voltar e refaz o vídeo
   em andamento. App fechado: "Continuar" pula os prontos.
 
+## Google Drive (0.10)
+
+- Cole um link do Drive (pasta ou arquivo) em Novo: abre um navegador dentro do app, sem passar pela nuvem.
+- Grade (estilo galeria) ou lista (estilo Arquivos), filtro Tudo/Vídeos/Fotos, subpastas, prévia em tela cheia
+  (foto grande; vídeo tocando direto do Drive) com informações.
+- Selecionar → baixar só os escolhidos; "Baixar tudo"; "⋯ › Baixar tudo, com as subpastas".
+- "E converter": depois de baixar, abre o conversor com os vídeos/fotos (lote).
+- O download vira um item "Google Drive" em Resultados: galeria de vídeos e imagens, outros arquivos,
+  Converter, Salvar no Fotos, Compartilhar/Salvar em Arquivos. Segue fora da tela; "Continuar" pula os já baixados.
+- Docs/Planilhas/Apresentações do Google baixam como PDF.
+- Precisa da chave de API do Google (Ajustes › Google Drive), guardada no Keychain. Só links públicos
+  ("qualquer pessoa com o link"). Login na conta Google fica para a 0.11.
+
 ## Nome de saída
 
 Todos os trabalhos têm o cartão "Nome de saída" (`App/Telas/NomeSaidaView.swift`,

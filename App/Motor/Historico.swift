@@ -3,7 +3,7 @@ import Observation
 
 /// Um resultado guardado neste iPhone (Documentos/Resultados/<id>/).
 struct Item: Codable, Identifiable, Equatable {
-    enum Tipo: String, Codable { case transcricao, voz, video, audio, imagem }
+    enum Tipo: String, Codable { case transcricao, voz, video, audio, imagem, drive }
     enum Estado: String, Codable { case processando, pronto, erro }
 
     var id = UUID()
@@ -36,6 +36,7 @@ struct Item: Codable, Identifiable, Equatable {
         case .video: return "film"
         case .audio: return "music.note"
         case .imagem: return "photo"
+        case .drive: return "icloud.and.arrow.down"
         }
     }
 }
@@ -53,7 +54,7 @@ struct OrigemImagem: Codable, Equatable {
 /// Tudo o que um trabalho no iPhone precisa para ser continuado depois que o app foi fechado.
 /// A entrada fica em Trabalhos/<id>/entrada (ver SegundoPlano.swift).
 struct Retomada: Codable, Equatable {
-    enum Tipo: String, Codable { case voz, conversao, imagens, transcricao, loteConversao }
+    enum Tipo: String, Codable { case voz, conversao, imagens, transcricao, loteConversao, drive }
     var tipo: Tipo
     var entradas: [String]            // nomes dentro de Trabalhos/<id>/entrada
     var nome: String                  // nome do arquivo original
@@ -70,6 +71,8 @@ struct Retomada: Codable, Equatable {
     var bases: [String]?                  // lote de vídeos: nome de saída de cada um
     var nomes: [String]?                  // lote de vídeos: nome original de cada um
     var datas: [Date]?
+    var drive: [Drive.Item]?              // download do Drive: os arquivos pedidos
+    var converterDepois: Bool?
 }
 
 /// Um pedido feito a partir de um link (baixar ou transcrever), guardado para repetir.

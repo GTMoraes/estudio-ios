@@ -7,6 +7,15 @@ struct ProcessarView: View {
     let entrada: Entrada
 
     var body: some View {
+        if case .drive(let l) = entrada {
+            NavegadorDrive(link: l, fechar: { fechar() })
+                .presentationDetents([.large])
+        } else {
+            formulario
+        }
+    }
+
+    private var formulario: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
@@ -15,6 +24,7 @@ struct ProcessarView: View {
                     case .arquivo(let u, let nome): PainelArquivo(arquivo: u, nome: nome, fechar: { fechar() })
                     case .imagens(let us): PainelImagens(arquivos: us, fechar: { fechar() })
                     case .videos(let us): PainelLoteVideos(arquivos: us, fechar: { fechar() })
+                    case .drive: EmptyView()
                     }
                 }
                 .padding()

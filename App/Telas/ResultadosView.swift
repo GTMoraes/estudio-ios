@@ -127,6 +127,9 @@ struct DetalheView: View {
                         }
                     }
 
+                    if item.estado == .pronto, item.tipo == .drive {
+                        PainelResultadoDrive(item: item, aviso: $aviso, salvarNoFotos: salvarTodasNoFotos)
+                    }
                     if item.estado == .pronto, item.tipo == .imagem || item.tipo == .video {
                         Cartao {
                             if let r = item.resumo, !r.isEmpty {
@@ -147,7 +150,7 @@ struct DetalheView: View {
                         Cartao(titulo: item.arquivos.count == 1 ? "Vídeo" : "\(item.arquivos.count) vídeos", icone: "film.stack") {
                             GradeVideos(item: item)
                         }
-                    } else if item.estado == .pronto {
+                    } else if item.estado == .pronto, item.tipo != .drive {
                         Cartao(titulo: "Arquivos", icone: "folder.fill") {
                             ForEach(item.arquivos, id: \.self) { nome in
                                 LinhaArquivo(url: item.url(nome), aviso: $aviso)
@@ -187,9 +190,10 @@ struct DetalheView: View {
     }
 
     private func salvarTodasNoFotos(_ item: Item) {
-        let urls = item.arquivos.map { item.url($0) }
-        let video = item.tipo == .video
-        let (um, varios) = video ? ("Vídeo salvo no Fotos.", "vídeos salvos no Fotos.") : ("Imagem salva no Fotos.", "imagens salvas no Fotos.")
+        let urls = item.arquivos.map { item.url($0) }.filter { ehImagem($0) || ehVideoArquivo($0) }
+        guard !urls.isEmpty else { return }
+        let videos = urls.filter(ehVideoArquivo).count
+        let fotos = urls.count - videos
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { st in
             guard st == .authorized || st == .limited else {
                 Task { @MainActor in aviso = "Sem permissão para salvar no Fotos (Ajustes › Privacidade › Fotos)." }
@@ -197,12 +201,15 @@ struct DetalheView: View {
             }
             PHPhotoLibrary.shared().performChanges({
                 for u in urls {
-                    if video { PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: u) }
+                    if ehVideoArquivo(u) { PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: u) }
                     else { PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: u) }
                 }
             }) { ok, erro in
                 Task { @MainActor in
-                    aviso = ok ? (urls.count == 1 ? um : "\(urls.count) " + varios)
+                    var partes: [String] = []
+                    if fotos > 0 { partes.append(fotos == 1 ? "1 imagem" : "\(fotos) imagens") }
+                    if videos > 0 { partes.append(videos == 1 ? "1 vídeo" : "\(videos) vídeos") }
+                    aviso = ok ? partes.joined(separator: " e ") + " no Fotos."
                                : "Não consegui salvar: \(erro?.localizedDescription ?? "formato não aceito pelo Fotos")"
                 }
             }
@@ -216,6 +223,7 @@ struct DetalheView: View {
         case .video: return "Vídeo"
         case .audio: return "Áudio"
         case .imagem: return "Imagens"
+        case .drive: return "Google Drive"
         }
     }
 }
