@@ -14,6 +14,7 @@ struct ProcessarView: View {
                     case .link(let l): PainelLink(link: l, fechar: { fechar() })
                     case .arquivo(let u, let nome): PainelArquivo(arquivo: u, nome: nome, fechar: { fechar() })
                     case .imagens(let us): PainelImagens(arquivos: us, fechar: { fechar() })
+                    case .videos(let us): PainelLoteVideos(arquivos: us, fechar: { fechar() })
                     }
                 }
                 .padding()
@@ -26,6 +27,7 @@ struct ProcessarView: View {
                     Button("Fechar", systemImage: "xmark") {
                         if case .arquivo(let u, _) = entrada { try? FileManager.default.removeItem(at: u) }
                         if case .imagens(let us) = entrada { us.forEach { try? FileManager.default.removeItem(at: $0) } }
+                        if case .videos(let us) = entrada { us.forEach { try? FileManager.default.removeItem(at: $0) } }
                         fechar()
                     }
                 }
@@ -37,6 +39,7 @@ struct ProcessarView: View {
     private var tituloTela: String {
         if case .link = entrada { return "Link" }
         if case .imagens(let us) = entrada { return us.count == 1 ? "Imagem" : "\(us.count) imagens" }
+        if case .videos(let us) = entrada { return "\(us.count) arquivos" }
         return "Arquivo"
     }
 }

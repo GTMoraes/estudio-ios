@@ -1,12 +1,25 @@
 import SwiftUI
 import AVKit
 
+enum ModoConversor { case unico, lote, video }
+
+/// Ajustes de conversão + a predefinição escolhida (para o lote e cada vídeo dele).
+struct AjusteConversao: Equatable {
+    var opcoes: OpcoesConversao
+    var selecao: String
+}
+
 /// Converter vídeo/áudio no iPhone (as predefinições do ConversorMidia + as suas).
 struct PainelConverter: View {
     @Environment(Estudio.self) private var estudio
     let arquivo: URL
     let nome: String
     var fechar: () -> Void
+    /// .unico: um arquivo (converte daqui). .lote: ajustes gerais de um lote (sem trecho, sem botão).
+    /// .video: ajustes de um vídeo dentro do lote (com trecho, sem botão).
+    var modo: ModoConversor = .unico
+    var inicial: AjusteConversao?
+    var mudou: ((AjusteConversao) -> Void)?
 
     @State private var info: InfoMidia?
     @State private var erro: String?
@@ -23,13 +36,18 @@ struct PainelConverter: View {
     private let personalizado = "p:" + PresetConversao.personalizado.rawValue
 
     var body: some View {
-        if let info {
-            conteudo(info)
-        } else if let erro {
-            Cartao { Label(erro, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.yellow) }
-        } else {
-            Cartao { HStack { ProgressView(); Text("Lendo o arquivo…") } }
-                .task { await carregar() }
+        Group {
+            if let info {
+                conteudo(info)
+            } else if let erro {
+                Cartao { Label(erro, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.yellow) }
+            } else {
+                Cartao { HStack { ProgressView(); Text("Lendo o arquivo…") } }
+                    .task { await carregar() }
+            }
+        }
+        .onChange(of: AjusteConversao(opcoes: o, selecao: selecao)) { _, novo in
+            if info != nil { mudou?(novo) }
         }
     }
 
@@ -37,9 +55,14 @@ struct PainelConverter: View {
         do {
             let i = try await InfoMidia.ler(arquivo)
             dataOriginal = await DataMidia.ler(arquivo)
-            info = i
-            let inicial: PresetConversao = !i.temVideo ? .audio : (i.hdr != .sdr ? .instagramHDR : .instagramSDR)
-            escolher("p:" + inicial.rawValue)
+            if let a = self.inicial {
+                o = a.opcoes; selecao = a.selecao
+                info = i
+            } else {
+                info = i
+                let inicial: PresetConversao = !i.temVideo ? .audio : (i.hdr != .sdr ? .instagramHDR : .instagramSDR)
+                escolher("p:" + inicial.rawValue)
+            }
         } catch {
             erro = "Não consegui ler esse arquivo: \(error.localizedDescription)"
         }
@@ -181,7 +204,15 @@ struct PainelConverter: View {
 
         if o.acao != .semRecodificar { velocidade(info) }
 
-        PainelTrecho(arquivo: arquivo, info: info, inicio: $o.inicio, fim: $o.fim)
+        if modo == .lote {
+            Cartao(titulo: "Trecho", icone: "scissors") {
+                Label("O trecho é ajustado em cada vídeo: toque nele na lista abaixo.", systemImage: "info.circle")
+                    .font(.footnote).foregroundStyle(Tema.texto2)
+            }
+            .opacity(0.6)
+        } else {
+            PainelTrecho(arquivo: arquivo, info: info, inicio: $o.inicio, fim: $o.fim)
+        }
 
         if saiVideo(info) && !o.animado {
             Cartao(titulo: "Data e local", icone: "calendar") {
@@ -196,10 +227,19 @@ struct PainelConverter: View {
                 Toggle("Manter a localização (GPS)", isOn: $o.manterLocalizacao)
             }
         }
-        CartaoNomeSaida(padrao: $padrao, tokens: tokensNome(info), previa: [previaNome(info)], nota: notaNome(info))
+        if modo == .unico {
+            CartaoNomeSaida(padrao: $padrao, tokens: tokensNome(info), previa: [previaNome(info)], nota: notaNome(info))
+        }
 
         Cartao {
             avisos(info)
+            if modo != .lote {
+                resultado(info)
+            }
+        }
+    }
+
+    @ViewBuilder private func resultado(_ info: InfoMidia) -> some View {
             if o.acao == .video {
                 let dims = PlanoConversao.dimensoes(info, o)
                 HStack {
@@ -223,11 +263,12 @@ struct PainelConverter: View {
                 Text(ByteCountFormatter.string(fromByteCount: PlanoConversao.tamanhoEstimado(info, o), countStyle: .file))
                     .monospacedDigit().fontWeight(.semibold)
             }
-            BotaoPrincipal(titulo: "Converter", icone: "arrow.triangle.2.circlepath") {
-                PadraoNome.gravar(padrao, .conversao)
-                estudio.converter(arquivo, nome: nome, info: info, opcoes: o, padrao: padrao, data: dataOriginal); fechar()
+            if modo == .unico {
+                BotaoPrincipal(titulo: "Converter", icone: "arrow.triangle.2.circlepath") {
+                    PadraoNome.gravar(padrao, .conversao)
+                    estudio.converter(arquivo, nome: nome, info: info, opcoes: o, padrao: padrao, data: dataOriginal); fechar()
+                }
             }
-        }
     }
 
     // MARK: vídeo

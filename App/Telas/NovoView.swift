@@ -6,7 +6,7 @@ struct NovoView: View {
     @Environment(Estudio.self) private var estudio
     @State private var link = ""
     @State private var escolhendoArquivo = false
-    @State private var itemGaleria: PhotosPickerItem?
+    @State private var videosGaleria: [PhotosPickerItem] = []
     @State private var carregandoGaleria = false
     @State private var escolhendoImagens = false
     @State private var fotosGaleria: [PhotosPickerItem] = []
@@ -48,7 +48,8 @@ struct NovoView: View {
                                 .buttonStyle(.glass)
                                 // .current: entrega o arquivo original (HEVC/Dolby Vision/60 fps); o padrão
                                 // (.automatic) converte para H.264 SDR 30 fps antes de chegar ao app
-                                PhotosPicker(selection: $itemGaleria, matching: .videos, preferredItemEncoding: .current) {
+                                PhotosPicker(selection: $videosGaleria, maxSelectionCount: 20, matching: .videos,
+                                             preferredItemEncoding: .current) {
                                     Label(carregandoGaleria ? "Abrindo…" : "Galeria", systemImage: "photo.on.rectangle")
                                         .frame(maxWidth: .infinity).padding(.vertical, 6)
                                 }
@@ -120,20 +121,21 @@ struct NovoView: View {
                     urls.forEach { try? FileManager.default.removeItem(at: $0) }
                 }
             }
-            .onChange(of: itemGaleria) { _, novo in
-                guard let novo else { return }
+            .onChange(of: videosGaleria) { _, novos in
+                guard !novos.isEmpty else { return }
                 carregandoGaleria = true
                 Task {
-                    defer { carregandoGaleria = false; itemGaleria = nil }
-                    do {
-                        let video = try await novo.loadTransferable(type: VideoDaGaleria.self)
-                        if let v = video {
-                            estudio.importar(v.url, nome: v.nome)
-                            try? FileManager.default.removeItem(at: v.url)
-                        }
-                    } catch {
-                        estudio.aviso = "Não consegui abrir o vídeo da galeria: \(error.localizedDescription)"
+                    defer { carregandoGaleria = false; videosGaleria = [] }
+                    var urls: [URL] = [], nomes: [String] = [], falhas = 0
+                    for item in novos {
+                        if let v = try? await item.loadTransferable(type: VideoDaGaleria.self) {
+                            urls.append(v.url); nomes.append(v.nome)
+                        } else { falhas += 1 }
                     }
+                    // um vídeo abre o conversor normal; vários viram um lote
+                    if !urls.isEmpty { estudio.importarVarios(urls, nomes: nomes) }
+                    urls.forEach { try? FileManager.default.removeItem(at: $0) }
+                    if falhas > 0 { estudio.aviso = "Não consegui abrir \(falhas) vídeo(s) da galeria." }
                 }
             }
         }

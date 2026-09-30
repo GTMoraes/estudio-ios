@@ -8,12 +8,14 @@ enum Entrada: Identifiable, Equatable {
     case link(String)
     case arquivo(URL, nome: String)
     case imagens([URL])
+    case videos([URL])            // vários áudios/vídeos: um lote do conversor
 
     var id: String {
         switch self {
         case .link(let l): return "link:" + l
         case .arquivo(let u, _): return "arq:" + u.path
         case .imagens(let us): return "img:\(us.count):" + (us.first?.path ?? "")
+        case .videos(let us): return "vid:\(us.count):" + (us.first?.path ?? "")
         }
     }
 }
@@ -68,6 +70,7 @@ final class Estudio {
     /// Lê o que a extensão de compartilhar deixou na caixa.
     func lerCaixa() {
         var imagens: [URL] = []
+        var midias: [(URL, String)] = []
         for r in Caixa.pendentes() {
             switch r.tipo {
             case .link:
@@ -77,13 +80,20 @@ final class Estudio {
                     let destino = Nuvem.semColisao(Self.pastaRecebidos.appendingPathComponent(r.nome))
                     if (try? FileManager.default.moveItem(at: origem, to: destino)) != nil {
                         if ehImagem(destino) { imagens.append(destino) }      // várias fotos viram um lote só
-                        else { receber(.arquivo(destino, nome: r.nome)) }
+                        else { midias.append((destino, r.nome)) }             // vários vídeos também
                     }
                 }
             }
             Caixa.remover(r)
         }
         if !imagens.isEmpty { receber(.imagens(imagens)) }
+        receberMidias(midias)
+    }
+
+    /// Um áudio/vídeo abre o conversor normal; vários viram um lote.
+    private func receberMidias(_ m: [(URL, String)]) {
+        if m.count == 1 { receber(.arquivo(m[0].0, nome: m[0].1)) }
+        else if m.count > 1 { receber(.videos(m.map { $0.0 })) }
     }
 
     /// estudio://caixa (vindo da extensão) ou arquivo aberto com "Abrir com".
@@ -115,20 +125,24 @@ final class Estudio {
     }
 
     /// Vários arquivos de uma vez (Arquivos ou Galeria): as imagens viram um lote só.
-    func importarVarios(_ urls: [URL]) {
+    /// nomes: nome original de cada arquivo (a galeria entrega com nome temporário).
+    func importarVarios(_ urls: [URL], nomes: [String]? = nil) {
         var imagens: [URL] = []
-        for u in urls {
+        var midias: [(URL, String)] = []
+        for (k, u) in urls.enumerated() {
             let acesso = u.startAccessingSecurityScopedResource()
             defer { if acesso { u.stopAccessingSecurityScopedResource() } }
-            let destino = Nuvem.semColisao(Self.pastaRecebidos.appendingPathComponent(u.lastPathComponent))
+            let nome = nomes.map { k < $0.count ? $0[k] : u.lastPathComponent } ?? u.lastPathComponent
+            let destino = Nuvem.semColisao(Self.pastaRecebidos.appendingPathComponent(nome))
             do {
                 try FileManager.default.copyItem(at: u, to: destino)
-                if ehImagem(destino) { imagens.append(destino) } else { receber(.arquivo(destino, nome: u.lastPathComponent)) }
+                if ehImagem(destino) { imagens.append(destino) } else { midias.append((destino, nome)) }
             } catch {
-                aviso = "Não consegui abrir \(u.lastPathComponent): \(error.localizedDescription)"
+                aviso = "Não consegui abrir \(nome): \(error.localizedDescription)"
             }
         }
         if !imagens.isEmpty { receber(.imagens(imagens)) }
+        receberMidias(midias)
     }
 
     var aviso: String?
@@ -323,6 +337,7 @@ final class Estudio {
         case .conversao: executarConversao(id)
         case .imagens: executarImagens(id)
         case .transcricao: executarTranscricao(id)
+        case .loteConversao: executarLote(id)
         }
     }
 
@@ -536,6 +551,128 @@ final class Estudio {
             }
             self.concluir(id, arquivos: [saida.lastPathComponent], inicio: inicio,
                           duracao: PlanoConversao.duracao(info, opcoes))
+        }
+    }
+
+    // --- lote de vídeos (no iPhone): um trabalho só, com a galeria dos resultados
+
+    struct VideoDoLote {
+        var url: URL
+        var nome: String
+        var info: InfoMidia
+        var opcoes: OpcoesConversao
+        var data: Date
+    }
+
+    func converterLote(_ videos: [VideoDoLote], padrao: String) {
+        guard !videos.isEmpty else { return }
+        let todosAnimados = videos.allSatisfy { $0.opcoes.animado && $0.info.temVideo }
+        let todosAudio = videos.allSatisfy { $0.opcoes.acao == .audio || !$0.info.temVideo }
+        let tipo: Item.Tipo = todosAnimados ? .imagem : todosAudio ? .audio : .video
+        let id = novoItem(tipo, "\(videos.count) \(todosAudio ? "áudios" : "vídeos")", nuvem: false, mensagem: "Convertendo no iPhone")
+        var bases: [String] = []
+        var usados = Set<String>()
+        for v in videos {
+            let dims: (Int, Int)? = v.info.temVideo && v.opcoes.acao != .audio ? PlanoConversao.dimensoesSaida(v.info, v.opcoes) : nil
+            var b = PadraoNome.base(v.nome, padrao: padrao, data: v.opcoes.usarDataAtual ? Date() : v.data,
+                                    largura: dims?.0, altura: dims?.1)
+            // dois vídeos com o mesmo nome de saída: numera
+            var n = 2
+            let original = b
+            while usados.contains(b.lowercased()) { b = "\(original) (\(n))"; n += 1 }
+            usados.insert(b.lowercased())
+            bases.append(b)
+        }
+        historico.atualizar(id) { $0.origensMidia = [:] }
+        var r = Retomada(tipo: .loteConversao, entradas: [], nome: "\(videos.count) vídeos")
+        r.saidas = Array(repeating: nil, count: videos.count)
+        r.falhas = []
+        r.conversoes = videos.map { $0.opcoes }
+        r.bases = bases
+        r.nomes = videos.map { $0.nome }
+        r.datas = videos.map { $0.data }
+        if prepararTrabalho(id, videos.map { $0.url }, r) { executarLote(id) }
+    }
+
+    /// Converte os vídeos do lote um por um. Se o app sair da tela no meio de um, espera voltar
+    /// e refaz aquele; se for fechado, "Continuar" pula os que já ficaram prontos.
+    private func executarLote(_ id: UUID) {
+        guard let r0 = historico.item(id)?.retomada, let conv = r0.conversoes else { return }
+        let total = r0.entradas.count
+        let inicio = Date()
+        rodar(id) {
+            try await self.aguardarVez(id)
+            guard let item = self.historico.item(id) else { return }
+            try FileManager.default.createDirectory(at: item.pasta, withIntermediateDirectories: true)
+            var duracaoTotal = 0.0
+            for k in 0..<total {
+                try Task.checkCancellation()
+                guard let r = self.historico.item(id)?.retomada else { return }
+                if let feita = r.saidas?[k] ?? nil, !feita.isEmpty { continue }
+                let u = self.entrada(id, r.entradas[k])
+                let nomeOriginal = r.nomes?[k] ?? r.entradas[k]
+                let base = r.bases?[k] ?? Self.base(nomeOriginal)
+                let opcoes = conv[k]
+                while true {
+                    let geracao = EstadoApp.shared.geracao
+                    do {
+                        self.etapa(id, "Convertendo \(k + 1) de \(total)", Double(k) / Double(total))
+                        let info = try await InfoMidia.ler(u)
+                        var lux: Double?
+                        if info.temVideo && info.hdr != .sdr { lux = await DetalhesVideo.ambienteLux(u) }
+                        let saida = try await ConversorVideo.converter(u, info: info, opcoes: opcoes, pasta: item.pasta, base: base) { p in
+                            Task { @MainActor in
+                                self.etapa(id, "Convertendo \(k + 1) de \(total)", (Double(k) + p) / Double(total))
+                            }
+                        }
+                        duracaoTotal += PlanoConversao.duracao(info, opcoes)
+                        let nome = saida.lastPathComponent
+                        let origem = OrigemMidia(nome: nomeOriginal, largura: info.largura, altura: info.altura,
+                                                 bytes: info.tamanhoBytes, duracao: info.duracao, fps: info.fps,
+                                                 codec: info.codecVideo, hdr: info.hdr.rawValue, dolbyVision: info.dolbyVision,
+                                                 ambienteLux: lux, data: r.datas?[k])
+                        self.historico.atualizar(id) {
+                            $0.retomada?.saidas?[k] = nome
+                            var o = $0.origensMidia ?? [:]; o[nome] = origem; $0.origensMidia = o
+                        }
+                        break
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        if EstadoApp.shared.geracao != geracao, !Task.isCancelled {
+                            // saiu da tela no meio deste vídeo: espera voltar e refaz só ele
+                            self.etapa(id, "Pausado: volte ao Estúdio para continuar")
+                            await EstadoApp.shared.aguardarAtivo()
+                            self.apagarSobras(id)
+                            continue
+                        }
+                        self.apagarSobras(id)
+                        let msg = "\(nomeOriginal): \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
+                        self.historico.atualizar(id) {
+                            $0.retomada?.saidas?[k] = ""
+                            $0.retomada?.falhas?.append(msg)
+                        }
+                        break
+                    }
+                }
+            }
+            let fim = self.historico.item(id)?.retomada
+            let nomes = (fim?.saidas ?? []).compactMap { $0 }.filter { !$0.isEmpty }
+            let falhas = fim?.falhas ?? []
+            if nomes.isEmpty { throw ErroApp(falhas.first ?? "Nenhum vídeo convertido.") }
+            self.concluir(id, arquivos: nomes,
+                          resumo: falhas.isEmpty ? nil : "Não converti \(falhas.count): " + falhas.joined(separator: "; "),
+                          inicio: inicio, duracao: duracaoTotal > 0 ? duracaoTotal : nil)
+        }
+    }
+
+    /// Apaga da pasta do resultado o que não é saída pronta (arquivo pela metade de uma tentativa).
+    private func apagarSobras(_ id: UUID) {
+        guard let item = historico.item(id) else { return }
+        let prontos = Set((item.retomada?.saidas ?? []).compactMap { $0 })
+        let arquivos = (try? FileManager.default.contentsOfDirectory(atPath: item.pasta.path)) ?? []
+        for a in arquivos where !prontos.contains(a) {
+            try? FileManager.default.removeItem(at: item.pasta.appendingPathComponent(a))
         }
     }
 

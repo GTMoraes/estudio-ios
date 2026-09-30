@@ -17,7 +17,7 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     TARGETED_DEVICE_FAMILY: "1"
-    MARKETING_VERSION: "0.8.6"
+    MARKETING_VERSION: "0.9.0"
     CURRENT_PROJECT_VERSION: "1"
     CODE_SIGNING_ALLOWED: "NO"
     CODE_SIGNING_REQUIRED: "NO"
@@ -117,7 +117,7 @@ targets:
             NSExtensionActivationRule:
               NSExtensionActivationSupportsWebURLWithMaxCount: 1
               NSExtensionActivationSupportsText: true
-              NSExtensionActivationSupportsMovieWithMaxCount: 5
+              NSExtensionActivationSupportsMovieWithMaxCount: 20
               NSExtensionActivationSupportsImageWithMaxCount: 50
               NSExtensionActivationSupportsFileWithMaxCount: 50
               NSExtensionActivationSupportsAttachmentsWithMaxCount: 50

@@ -3,7 +3,7 @@
 App de iPhone que junta o whisper.frx9.com e o ConversorMidia: baixar links (YouTube, Instagram…),
 transcrever (texto `.txt` + legenda `.srt`) e tratar voz. Liquid Glass, tema escuro, iOS 26+.
 
-## O que roda onde (versão 0.8)
+## O que roda onde (versão 0.9)
 
 | Função | No iPhone | Na nuvem |
 |---|---|---|
@@ -90,6 +90,18 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
   `App/Motor/Animacao.swift`. Quadros SDR 8 bits da mesma composição (giro, enquadramento,
   velocidade, trecho), largura 320–800, 10–24 fps. Resultado vai para a galeria de imagens,
   que toca a animação.
+
+## Lote de vídeos (0.9)
+
+- Vários áudios/vídeos (Arquivos, Galeria até 20, Compartilhar até 20) abrem `PainelLoteVideos`
+  (`App/Telas/LoteView.swift`): ajustes do lote (o mesmo `PainelConverter`, modo `.lote`, sem trecho),
+  lista dos vídeos (tocar abre o conversor daquele vídeo, modo `.video`, com trecho; "Aplicar a todos";
+  "Voltar aos ajustes do lote") e um nome de saída para todos.
+- O enquadramento do lote é desenhado sobre o 1º vídeo e adaptado a cada um (`Enquadramento.adaptado`):
+  "preencher" mantém a proporção, o centro e o tamanho relativo.
+- Um trabalho só (`Estudio.converterLote` / `executarLote`), um vídeo por vez, galeria no resultado,
+  informações × original por arquivo (`Item.origensMidia`). Fora da tela: espera voltar e refaz o vídeo
+  em andamento. App fechado: "Continuar" pula os prontos.
 
 ## Nome de saída
 

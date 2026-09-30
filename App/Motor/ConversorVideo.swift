@@ -184,6 +184,26 @@ struct Enquadramento: Codable, Equatable {
     var proporcao: Double = 0.8          // largura/altura do resultado (preencher, caber, desfocar)
     var recorte = Recorte()              // região do vídeo, 0…1, já girado (preencher e livre)
 
+    /// O mesmo enquadramento num vídeo de outro formato (lote): "preencher" mantém a proporção
+    /// do resultado, o centro e o tamanho relativo (nada fica esticado); livre/caber/desfocado não mudam.
+    func adaptado(de origem: (w: Double, h: Double), para destino: (w: Double, h: Double)) -> Enquadramento {
+        guard modo == .preencher, proporcao > 0,
+              abs(origem.w / origem.h - destino.w / destino.h) > 0.001 else { return self }
+        func maior(_ w: Double, _ h: Double) -> (Double, Double) {     // maior recorte relativo na proporção
+            var lpx = w, apx = w / proporcao
+            if apx > h { apx = h; lpx = h * proporcao }
+            return (lpx / w, apx / h)
+        }
+        let (l0, _) = maior(origem.w, origem.h)
+        let fracao = min(1, max(0.05, recorte.largura / max(l0, 0.0001)))
+        let (l1, a1) = maior(destino.w, destino.h)
+        let nl = l1 * fracao, na = a1 * fracao
+        let cx = recorte.x + recorte.largura / 2, cy = recorte.y + recorte.altura / 2
+        var e = self
+        e.recorte = Recorte(x: min(max(0, cx - nl / 2), 1 - nl), y: min(max(0, cy - na / 2), 1 - na), largura: nl, altura: na)
+        return e
+    }
+
     static let proporcoes: [(nome: String, valor: Double)] = [
         ("9:16", 9.0 / 16), ("4:5", 0.8), ("1:1", 1), ("4:3", 4.0 / 3), ("16:9", 16.0 / 9),
     ]

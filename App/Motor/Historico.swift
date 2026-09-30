@@ -22,6 +22,7 @@ struct Item: Codable, Identifiable, Equatable {
     var baseSaida: String?            // nome de saída escolhido (padrão de nome), para retomar da nuvem
     var origens: [String: OrigemImagem]?   // imagens: arquivo convertido -> como era o original
     var origemMidia: OrigemMidia?          // conversão de vídeo: como era o original
+    var origensMidia: [String: OrigemMidia]?   // lote de vídeos: arquivo convertido -> original
     var retomada: Retomada?                // trabalho no iPhone: o que é preciso para continuar
     var pedidoLink: PedidoLink?            // link: o pedido original, para "Tentar de novo"
 
@@ -52,7 +53,7 @@ struct OrigemImagem: Codable, Equatable {
 /// Tudo o que um trabalho no iPhone precisa para ser continuado depois que o app foi fechado.
 /// A entrada fica em Trabalhos/<id>/entrada (ver SegundoPlano.swift).
 struct Retomada: Codable, Equatable {
-    enum Tipo: String, Codable { case voz, conversao, imagens, transcricao }
+    enum Tipo: String, Codable { case voz, conversao, imagens, transcricao, loteConversao }
     var tipo: Tipo
     var entradas: [String]            // nomes dentro de Trabalhos/<id>/entrada
     var nome: String                  // nome do arquivo original
@@ -63,8 +64,12 @@ struct Retomada: Codable, Equatable {
     var conversao: OpcoesConversao?
     var imagem: OpcoesImagem?
     var idioma: String?
-    var saidas: [String?]?            // imagens: nome gravado de cada entrada (nil = falta fazer)
+    var saidas: [String?]?            // imagens e lote: nome gravado de cada entrada (nil = falta fazer; "" = falhou)
     var falhas: [String]?
+    var conversoes: [OpcoesConversao]?    // lote de vídeos: ajustes de cada um
+    var bases: [String]?                  // lote de vídeos: nome de saída de cada um
+    var nomes: [String]?                  // lote de vídeos: nome original de cada um
+    var datas: [Date]?
 }
 
 /// Um pedido feito a partir de um link (baixar ou transcrever), guardado para repetir.

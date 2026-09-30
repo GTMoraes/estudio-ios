@@ -92,7 +92,7 @@ struct VisualizadorVideos: View {
                 .tabViewStyle(.page(indexDisplayMode: .never))
                 if mostrarInfo, !item.arquivos.isEmpty {
                     let nome = item.arquivos[min(atual, item.arquivos.count - 1)]
-                    PainelInfoVideo(url: item.url(nome), origem: item.origemMidia)
+                    PainelInfoVideo(url: item.url(nome), origem: item.origensMidia?[nome] ?? item.origemMidia)
                         .id(nome)
                         .frame(maxHeight: 340)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
