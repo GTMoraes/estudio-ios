@@ -74,10 +74,10 @@ struct EditorEnquadramento: View {
                             .buttonStyle(.glass).disabled(zoom >= zoomMax - 0.001)
                         Button("Ver a seleção") { focarSelecao() }.buttonStyle(.glass).font(.footnote)
                         if zoom > 1.001 {
-                            Button("1×") { withAnimation(.snappy) { zoom = 1; desloc = .zero } }.buttonStyle(.glass).font(.footnote)
+                            Button("1×") { zoom = 1; desloc = .zero }.buttonStyle(.glass).font(.footnote)
                         }
                     }
-                    Text("Pinça ou botões para dar zoom na prévia; arraste fora da moldura para mover. O resultado não muda.")
+                    Text("Zoom só na prévia (o resultado não muda): pinça em qualquer lugar ou os botões. Um dedo na moldura move a seleção; fora dela move o vídeo. Toque duplo: ver a seleção / 1×.")
                         .font(.caption).foregroundStyle(Tema.texto2).padding(.horizontal)
                 }
 
@@ -96,6 +96,7 @@ struct EditorEnquadramento: View {
             }
             .padding(.vertical)
             .telaEscura()
+            .interactiveDismissDisabled()        // arrastar a moldura para baixo não fecha a folha
             .navigationTitle("Enquadramento")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -187,65 +188,107 @@ struct EditorEnquadramento: View {
     private func areaRecorte(_ img: UIImage, _ area: CGSize) -> some View {
         let q0 = encaixe(aspectoVideo, em: area)
         let q = retanguloZoom(q0)
-        let r = e.recorte
-        let caixa = CGRect(x: q.minX + CGFloat(r.x) * q.width, y: q.minY + CGFloat(r.y) * q.height,
-                           width: CGFloat(r.largura) * q.width, height: CGFloat(r.altura) * q.height)
+        let caixa = retanguloSelecao(q)
         ZStack(alignment: .topLeading) {
+            // tamanho fixo + escala/deslocamento: a GPU só transforma a textura (nada de
+            // redesenhar um quadro 4K ampliado 8× a cada passo). Mesma posição de `q`.
             Image(uiImage: img).resizable()
                 .interpolation(zoom > 2 ? .none : .high)       // no zoom forte, mostra os pixels de verdade
-                .frame(width: q.width, height: q.height)
-                .position(x: q.midX, y: q.midY)
-                .allowsHitTesting(false)
-            // fundo: pinça para zoom e arrastar para mover a prévia (fora da moldura)
-            Color.clear
-                .contentShape(Rectangle())
-                .frame(width: area.width, height: area.height)
-                .position(x: area.width / 2, y: area.height / 2)
-                .onAppear { areaAtual = area }
-                .onChange(of: area) { _, n in areaAtual = n }
-                .gesture(SimultaneousGesture(
-                    gestoZoom(q0),
-                    DragGesture(minimumDistance: 4)
-                        .onChanged { g in
-                            guard zoomInicio == nil else { return }
-                            if deslocInicio == nil { deslocInicio = desloc }
-                            let b = deslocInicio ?? .zero
-                            desloc = limitar(CGSize(width: b.width + g.translation.width, height: b.height + g.translation.height), q0, zoom)
-                        }
-                        .onEnded { _ in deslocInicio = nil }))
-                .onTapGesture(count: 2) { withAnimation(.snappy) { if zoom > 1.001 { zoom = 1; desloc = .zero } else { focarSelecao() } } }
+                .frame(width: q0.width, height: q0.height)
+                .scaleEffect(zoom)
+                .offset(desloc)
+                .position(x: q0.midX, y: q0.midY)
             Path { p in p.addRect(q); p.addRect(caixa) }
                 .fill(Color.black.opacity(0.6), style: FillStyle(eoFill: true))
-                .allowsHitTesting(false)
             Rectangle().stroke(Color.white, lineWidth: 2)
                 .frame(width: caixa.width, height: caixa.height)
-                .contentShape(Rectangle())
                 .position(x: caixa.midX, y: caixa.midY)
-                .simultaneousGesture(gestoZoom(q0))
-                .gesture(DragGesture()
-                    .onChanged { g in
-                        guard zoomInicio == nil else { inicio = nil; return }
-                        if inicio == nil { inicio = e.recorte }
-                        guard let b = inicio else { return }
-                        e.recorte.x = min(max(0, b.x + Double(g.translation.width / q.width)), 1 - b.largura)
-                        e.recorte.y = min(max(0, b.y + Double(g.translation.height / q.height)), 1 - b.altura)
-                    }
-                    .onEnded { _ in inicio = nil })
             ForEach(0..<4, id: \.self) { k in
                 let sx = k % 2, sy = k / 2
                 Circle().fill(Color.white).frame(width: 22, height: 22)
                     .overlay(Circle().stroke(Tema.acento, lineWidth: 2))
-                    .frame(width: 44, height: 44).contentShape(Rectangle())
                     .position(x: sx == 0 ? caixa.minX : caixa.maxX, y: sy == 0 ? caixa.minY : caixa.maxY)
-                    .gesture(DragGesture()
-                        .onChanged { g in
-                            if inicio == nil { inicio = e.recorte }
-                            guard let b = inicio else { return }
-                            redimensionar(b, sx: sx, sy: sy,
-                                          dx: Double(g.translation.width / q.width), dy: Double(g.translation.height / q.height))
-                        }
-                        .onEnded { _ in inicio = nil })
             }
+        }
+        .allowsHitTesting(false)
+        // todos os toques da área passam por gestos do UIKit: pinça em qualquer lugar (inclusive
+        // dentro da moldura), um dedo move a moldura, os cantos redimensionam, fora dela move o vídeo
+        .overlay {
+            CamadaGestos(
+                aoArrastar: { fase, ponto, desloc in arrastar(fase, ponto, desloc) },
+                aoPincar: { fase, escala, centro in pincar(fase, escala, centro) },
+                aoTocarDuas: { if zoom > 1.001 { zoom = 1; desloc = .zero } else { focarSelecao() } })
+        }
+        .onAppear { areaAtual = area }
+        .onChange(of: area) { _, n in areaAtual = n }
+    }
+
+    private func retanguloSelecao(_ q: CGRect) -> CGRect {
+        let r = e.recorte
+        return CGRect(x: q.minX + CGFloat(r.x) * q.width, y: q.minY + CGFloat(r.y) * q.height,
+                      width: CGFloat(r.largura) * q.width, height: CGFloat(r.altura) * q.height)
+    }
+
+    // MARK: gestos (UIKit)
+
+    private enum Alvo { case mover, canto(Int, Int), video }
+    @State private var alvo: Alvo?
+    @State private var ancoraPinca: CGPoint = .zero
+
+    private func arrastar(_ fase: UIGestureRecognizer.State, _ ponto: CGPoint, _ t: CGSize) {
+        guard let q0 = ultimoQ0 else { return }
+        let q = retanguloZoom(q0)
+        switch fase {
+        case .began:
+            let caixa = retanguloSelecao(q)
+            // o ponto onde o dedo encostou (o UIKit só começa depois de alguns pontos de movimento)
+            let p0 = CGPoint(x: ponto.x - t.width, y: ponto.y - t.height)
+            let raio: CGFloat = 30
+            var achou: Alvo?
+            for k in 0..<4 {
+                let sx = k % 2, sy = k / 2
+                let c = CGPoint(x: sx == 0 ? caixa.minX : caixa.maxX, y: sy == 0 ? caixa.minY : caixa.maxY)
+                if hypot(p0.x - c.x, p0.y - c.y) <= raio { achou = .canto(sx, sy); break }
+            }
+            alvo = achou ?? (caixa.contains(p0) ? .mover : .video)
+            inicio = e.recorte
+            deslocInicio = desloc
+            fallthrough
+        case .changed:
+            guard let b = inicio else { return }
+            switch alvo {
+            case .mover?:
+                e.recorte.x = min(max(0, b.x + Double(t.width / q.width)), 1 - b.largura)
+                e.recorte.y = min(max(0, b.y + Double(t.height / q.height)), 1 - b.altura)
+            case .canto(let sx, let sy)?:
+                redimensionar(b, sx: sx, sy: sy, dx: Double(t.width / q.width), dy: Double(t.height / q.height))
+            case .video?:
+                let d = deslocInicio ?? .zero
+                desloc = limitar(CGSize(width: d.width + t.width, height: d.height + t.height), q0, zoom)
+            case nil: break
+            }
+        default:
+            alvo = nil; inicio = nil; deslocInicio = nil
+        }
+    }
+
+    private func pincar(_ fase: UIGestureRecognizer.State, _ escala: CGFloat, _ centro: CGPoint) {
+        guard let q0 = ultimoQ0 else { return }
+        switch fase {
+        case .began:
+            zoomInicio = zoom; deslocInicio = desloc; ancoraPinca = centro
+            fallthrough
+        case .changed:
+            let z0 = zoomInicio ?? zoom, d0 = deslocInicio ?? desloc
+            let z = min(max(1, z0 * escala), zoomMax)
+            // o ponto que estava sob os dedos no começo segue os dedos (zoom + mover com dois dedos)
+            let c = CGPoint(x: q0.midX + d0.width, y: q0.midY + d0.height)
+            let f = z / max(z0, 0.01)
+            let c2 = CGPoint(x: centro.x + (c.x - ancoraPinca.x) * f, y: centro.y + (c.y - ancoraPinca.y) * f)
+            zoom = z
+            desloc = limitar(CGSize(width: c2.x - q0.midX, height: c2.y - q0.midY), q0, z)
+        default:
+            zoomInicio = nil; deslocInicio = nil
         }
     }
 
@@ -275,13 +318,11 @@ struct EditorEnquadramento: View {
 
     /// Botões +/−: zoom pelo centro da prévia.
     private func mudarZoom(_ novo: CGFloat) {
-        withAnimation(.snappy) {
-            let z = min(max(1, novo), zoomMax)
-            let f = z / zoom
-            zoom = z
-            desloc = CGSize(width: desloc.width * f, height: desloc.height * f)
-            ultimoQ0.map { desloc = limitar(desloc, $0, z) }
-        }
+        let z = min(max(1, novo), zoomMax)
+        let f = z / zoom
+        zoom = z
+        desloc = CGSize(width: desloc.width * f, height: desloc.height * f)
+        if let q0 = ultimoQ0 { desloc = limitar(desloc, q0, z) }
     }
 
     /// Enquadra a seleção na prévia (ocupando ~70% da área).
@@ -292,24 +333,12 @@ struct EditorEnquadramento: View {
         // centro da seleção em coordenadas da imagem sem zoom (relativo ao centro)
         let cx = (CGFloat(r.x + r.largura / 2) - 0.5) * q0.width
         let cy = (CGFloat(r.y + r.altura / 2) - 0.5) * q0.height
-        withAnimation(.snappy) {
-            zoom = z
-            desloc = limitar(CGSize(width: -cx * z, height: -cy * z), q0, z)
-        }
+        zoom = z
+        desloc = limitar(CGSize(width: -cx * z, height: -cy * z), q0, z)
     }
 
     @State private var areaAtual: CGSize = .zero
     private var ultimoQ0: CGRect? { areaAtual == .zero ? nil : encaixe(aspectoVideo, em: areaAtual) }
-
-    private func gestoZoom(_ q0: CGRect) -> some Gesture {
-        MagnifyGesture()
-            .onChanged { g in
-                if zoomInicio == nil { zoomInicio = zoom; deslocInicio = desloc }
-                aplicarZoom((zoomInicio ?? 1) * g.magnification, ancora: g.startLocation, base: q0,
-                            zoomBase: zoomInicio ?? 1, deslocBase: deslocInicio ?? .zero)
-            }
-            .onEnded { _ in zoomInicio = nil; deslocInicio = nil }
-    }
 
     private func redimensionar(_ b: Recorte, sx: Int, sy: Int, dx: Double, dy: Double) {
         var x0 = b.x, x1 = b.x + b.largura, y0 = b.y, y1 = b.y + b.altura
@@ -328,5 +357,66 @@ struct EditorEnquadramento: View {
             if sy == 0 { y0 = y1 - h } else { y1 = y0 + h }
         }
         e.recorte = Recorte(x: x0, y: y0, largura: x1 - x0, altura: y1 - y0)
+    }
+}
+
+
+/// Camada transparente com gestos do UIKit: um dedo (arrastar), dois (pinça) e toque duplo,
+/// reconhecidos juntos e sem atraso (os do SwiftUI seguravam o arrastar até soltar o dedo).
+struct CamadaGestos: UIViewRepresentable {
+    var aoArrastar: (UIGestureRecognizer.State, CGPoint, CGSize) -> Void
+    var aoPincar: (UIGestureRecognizer.State, CGFloat, CGPoint) -> Void
+    var aoTocarDuas: () -> Void
+
+    func makeCoordinator() -> Coordenador { Coordenador() }
+
+    func makeUIView(context: Context) -> UIView {
+        let v = UIView()
+        v.backgroundColor = .clear
+        let c = context.coordinator
+        let arrasto = UIPanGestureRecognizer(target: c, action: #selector(Coordenador.arrastou(_:)))
+        arrasto.maximumNumberOfTouches = 1
+        arrasto.delegate = c
+        let pinca = UIPinchGestureRecognizer(target: c, action: #selector(Coordenador.pincou(_:)))
+        pinca.delegate = c
+        let duplo = UITapGestureRecognizer(target: c, action: #selector(Coordenador.tocou(_:)))
+        duplo.numberOfTapsRequired = 2
+        v.addGestureRecognizer(arrasto)
+        v.addGestureRecognizer(pinca)
+        v.addGestureRecognizer(duplo)
+        c.arrasto = arrasto
+        return v
+    }
+
+    func updateUIView(_ v: UIView, context: Context) {
+        context.coordinator.pai = self
+    }
+
+    final class Coordenador: NSObject, UIGestureRecognizerDelegate {
+        var pai: CamadaGestos?
+        weak var arrasto: UIPanGestureRecognizer?
+
+        @objc func arrastou(_ g: UIPanGestureRecognizer) {
+            guard let v = g.view else { return }
+            let t = g.translation(in: v)
+            pai?.aoArrastar(g.state, g.location(in: v), CGSize(width: t.x, height: t.y))
+        }
+
+        @objc func pincou(_ g: UIPinchGestureRecognizer) {
+            guard let v = g.view else { return }
+            if g.state == .began, let a = arrasto, a.state == .began || a.state == .changed {
+                // o segundo dedo chegou: cancela o arrastar de um dedo (a moldura não anda junto com o zoom)
+                a.isEnabled = false; a.isEnabled = true
+            }
+            pai?.aoPincar(g.state, g.scale, g.location(in: v))
+        }
+
+        @objc func tocou(_ g: UITapGestureRecognizer) {
+            if g.state == .ended { pai?.aoTocarDuas() }
+        }
+
+        func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith outro: UIGestureRecognizer) -> Bool {
+            true
+        }
     }
 }
