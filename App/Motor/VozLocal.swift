@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import os
 import OnnxRuntimeBindings   // liga a biblioteca do ONNX Runtime (usada pela API C em mv_ort.c)
 
 /// Tratamento de voz no iPhone: o mesmo motor da nuvem (motor_voz), portado para C
@@ -105,6 +106,38 @@ private final class Baixador: NSObject, URLSessionDownloadDelegate, @unchecked S
     }
 }
 
+// MARK: - diagnóstico
+
+/// Registro das etapas em Documentos/diagnostico-voz.txt (aparece no app Arquivos, em
+/// "No meu iPhone › Estúdio"). Se o app fechar no meio, a última linha mostra onde parou
+/// e quanta memória ainda sobrava.
+enum Diagnostico {
+    private static let fila = DispatchQueue(label: "diagnostico-voz")
+    static var arquivo: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("diagnostico-voz.txt")
+    }
+
+    static func iniciar() {
+        fila.sync { try? Data().write(to: arquivo) }
+        log("início")
+    }
+
+    static func log(_ msg: String) {
+        let livre = Double(os_proc_available_memory()) / 1_048_576
+        let linha = String(format: "%@  %@  (memória livre para o app: %.0f MB)\n",
+                           ISO8601DateFormatter().string(from: Date()), msg, livre)
+        fila.sync {
+            guard let d = linha.data(using: .utf8) else { return }
+            if let h = try? FileHandle(forWritingTo: arquivo) {
+                h.seekToEndOfFile(); h.write(d); try? h.synchronize(); try? h.close()
+            } else {
+                try? d.write(to: arquivo)
+            }
+        }
+    }
+}
+
 // MARK: - motor
 
 /// Estado compartilhado com o C durante um tratamento (passado como ctx).
@@ -113,6 +146,9 @@ private final class HostVoz {
     let ort: OpaquePointer?
     var cancelado = false
     let progresso: (Int32, Double) -> Void
+    var modelosVistos = Set<Int32>()
+    var ultimaEtapa: Int32 = -1
+    var ultimoDecimo = -1
 
     init(ort: OpaquePointer?, progresso: @escaping (Int32, Double) -> Void) {
         self.ort = ort
@@ -130,11 +166,24 @@ private final class HostVoz {
 private let cInferir: MVInferir = { ctx, modelo, entrada, saida in
     guard let ctx else { return -1 }
     let h = Unmanaged<HostVoz>.fromOpaque(ctx).takeUnretainedValue()
-    return mv_ort_inferir(UnsafeMutableRawPointer(h.ort), modelo, entrada, saida)
+    let primeira = !h.modelosVistos.contains(modelo)
+    if primeira { h.modelosVistos.insert(modelo); Diagnostico.log("modelo \(modelo): abrindo e rodando a 1ª vez") }
+    let r = mv_ort_inferir(UnsafeMutableRawPointer(h.ort), modelo, entrada, saida)
+    if primeira || r != 0 {
+        let e = h.ort.map { String(cString: mv_ort_erro($0)) } ?? ""
+        Diagnostico.log("modelo \(modelo): 1ª inferência r=\(r) \(e)")
+    }
+    return r
 }
 private let cProgresso: MVProgresso = { ctx, etapa, fracao in
     guard let ctx else { return }
-    Unmanaged<HostVoz>.fromOpaque(ctx).takeUnretainedValue().progresso(etapa, fracao)
+    let h = Unmanaged<HostVoz>.fromOpaque(ctx).takeUnretainedValue()
+    let decimo = Int(fracao * 10)
+    if etapa != h.ultimaEtapa || decimo != h.ultimoDecimo {
+        h.ultimaEtapa = etapa; h.ultimoDecimo = decimo
+        Diagnostico.log(String(format: "etapa %d: %.0f%%", etapa, fracao * 100))
+    }
+    h.progresso(etapa, fracao)
 }
 private let cCancelado: MVCancelado = { ctx in
     guard let ctx else { return 0 }
@@ -148,7 +197,10 @@ enum VozLocal {
     /// Trata `arquivo` e grava os MP3 em `pasta`. Devolve os nomes (mix, voz, trilha).
     static func tratar(_ arquivo: URL, opcoes: OpcoesVozLocal, pasta: URL, base: String,
                        progresso: @escaping @Sendable (String, Double?) -> Void) async throws -> (arquivos: [String], duracao: Double) {
+        Diagnostico.iniciar()
+        Diagnostico.log("arquivo: \(arquivo.lastPathComponent), modo \(opcoes.voz.modo.rawValue), eco \(opcoes.voz.eco), clareza \(opcoes.voz.clareza), quadra \(opcoes.quadra)")
         if !ModelosVoz.prontos {
+            Diagnostico.log("baixando modelos")
             progresso("Baixando os modelos de voz (1ª vez)", 0)
             try await ModelosVoz.baixar { p in progresso("Baixando os modelos de voz (1ª vez)", p) }
         }
@@ -160,7 +212,9 @@ enum VozLocal {
 
         progresso("Lendo o áudio", nil)
         let entrada = tmp.appendingPathComponent("entrada.f32")
+        Diagnostico.log("modelos prontos; lendo o áudio")
         let quadros = try await LeitorAudio.lerEstereo441(arquivo, para: entrada)
+        Diagnostico.log(String(format: "áudio lido: %.1f s", Double(quadros) / 44100))
         try Task.checkCancellation()
 
         let v = opcoes.voz
@@ -189,21 +243,30 @@ enum VozLocal {
                         pasta.appendingPathComponent(nTri).path, pasta.appendingPathComponent(nMix).path]
         let opC = op
 
-        let (r, msg): (Int32, String) = try await withTaskCancellationHandler {
-            try await Task.detached(priority: .userInitiated) {
-                var erro = [CChar](repeating: 0, count: 512)
-                let ctx = Unmanaged.passUnretained(host).toOpaque()
-                let h = MVHost(inferir: cInferir, progresso: cProgresso, cancelado: cCancelado, ctx: ctx)
-                let c = caminhos.map { strdup($0) }
-                defer { c.forEach { free($0) } }
-                let r = mv_tratar(c[0], c[1], c[2], separar ? c[3] : nil, separar ? c[4] : nil,
-                                  nil, opC, h, &erro, Int32(erro.count))
-                withExtendedLifetime(host) {}
-                return (r, String(cString: erro))
-            }.value
+        Diagnostico.log("motor aberto: \(host.ort == nil ? "falhou" : "ok"); começando")
+        // o motor roda numa thread própria com pilha de 16 MB: as threads das Tasks do Swift
+        // têm só 512 KB, pouco para o ONNX Runtime
+        let (r, msg): (Int32, String) = await withTaskCancellationHandler {
+            await withCheckedContinuation { (cont: CheckedContinuation<(Int32, String), Never>) in
+                let t = Thread {
+                    var erro = [CChar](repeating: 0, count: 512)
+                    let ctx = Unmanaged.passUnretained(host).toOpaque()
+                    let h = MVHost(inferir: cInferir, progresso: cProgresso, cancelado: cCancelado, ctx: ctx)
+                    let c = caminhos.map { strdup($0) }
+                    let r = mv_tratar(c[0], c[1], c[2], separar ? c[3] : nil, separar ? c[4] : nil,
+                                      nil, opC, h, &erro, Int32(erro.count))
+                    c.forEach { free($0) }
+                    withExtendedLifetime(host) {}
+                    cont.resume(returning: (r, String(cString: erro)))
+                }
+                t.stackSize = 16 << 20
+                t.qualityOfService = .userInitiated
+                t.start()
+            }
         } onCancel: {
             host.cancelado = true
         }
+        Diagnostico.log("fim: r=\(r) \(msg)")
         if r == 1 { throw CancellationError() }
         if r != 0 {
             for n in [nVoz, nTri, nMix] { try? FileManager.default.removeItem(at: pasta.appendingPathComponent(n)) }
@@ -234,6 +297,7 @@ enum LeitorAudio {
             taxaFonte = asbd.mSampleRate > 0 ? asbd.mSampleRate : 44100
         }
         let canaisLidos = canaisFonte == 1 ? 1 : 2
+        Diagnostico.log("fonte: \(canaisFonte) canal(is), \(Int(taxaFonte)) Hz")
         let leitor = try AVAssetReader(asset: asset)
         let saida = AVAssetReaderTrackOutput(track: trilha, outputSettings: [
             AVFormatIDKey: kAudioFormatLinearPCM,
