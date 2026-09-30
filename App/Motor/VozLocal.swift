@@ -266,7 +266,8 @@ enum VozLocal {
         } onCancel: {
             host.cancelado = true
         }
-        Diagnostico.log("fim: r=\(r) \(msg)")
+        let ne = mv_ort_neural_ativo(host.ort)
+        Diagnostico.log("fim: r=\(r) \(msg) · Neural Engine: separação \(ne & 1 != 0 ? "sim" : "não"), eco \(ne & 2 != 0 ? "sim" : "não")")
         if r == 1 { throw CancellationError() }
         if r != 0 {
             for n in [nVoz, nTri, nMix] { try? FileManager.default.removeItem(at: pasta.appendingPathComponent(n)) }

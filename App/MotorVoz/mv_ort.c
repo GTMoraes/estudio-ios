@@ -5,6 +5,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef __APPLE__
+/* coreml_provider_factory.h (ORT 1.19.2): a biblioteca do iOS exporta esta função */
+enum { MV_COREML_FLAG_CREATE_MLPROGRAM = 0x010 };
+ORT_EXPORT ORT_API_STATUS(OrtSessionOptionsAppendExecutionProvider_CoreML, _In_ OrtSessionOptions* options,
+                          uint32_t coreml_flags);
+#endif
+
 struct MVOrt {
     const OrtApi *api;
     OrtEnv *env;
@@ -12,6 +19,7 @@ struct MVOrt {
     OrtSession *sess[2];
     char *caminho[2];
     int neural;
+    int neural_ativo;          /* bit 0: separação no Neural Engine; bit 1: eco */
     char erro[512];
 };
 
@@ -37,16 +45,21 @@ MVOrt *mv_ort_abrir(const char *modelo_separacao, const char *modelo_eco, int ne
 
 const char *mv_ort_erro(const MVOrt *o) { return o ? o->erro : "sem memória"; }
 
+int mv_ort_neural_ativo(const MVOrt *o) { return o ? o->neural_ativo : 0; }
+
 static OrtSession *criar(MVOrt *o, const char *caminho, int neural) {
     const OrtApi *api = o->api;
     OrtSessionOptions *so = NULL;
     OrtSession *s = NULL;
     if (falhou(o, api->CreateSessionOptions(&so))) return NULL;
-    int ok = !falhou(o, api->DisableCpuMemArena(so)) && !falhou(o, api->DisableMemPattern(so));
+    int ok = !falhou(o, api->DisableCpuMemArena(so)) && !falhou(o, api->DisableMemPattern(so))
+             && !falhou(o, api->AddFreeDimensionOverrideByName(so, "batch_size", 1));
     if (ok && neural) {
-        const char *k[2] = { "MLComputeUnits", "ModelFormat" };
-        const char *v[2] = { "All", "MLProgram" };
-        ok = !falhou(o, api->SessionOptionsAppendExecutionProvider(so, "CoreML", k, v, 2));
+#ifdef __APPLE__
+        ok = !falhou(o, OrtSessionOptionsAppendExecutionProvider_CoreML(so, MV_COREML_FLAG_CREATE_MLPROGRAM));
+#else
+        ok = 0;
+#endif
     }
     if (ok) falhou(o, api->CreateSession(o->env, caminho, so, &s));
     api->ReleaseSessionOptions(so);
@@ -59,7 +72,8 @@ static OrtSession *sessao(MVOrt *o, int modelo) {
     if (o->sess[outro]) { o->api->ReleaseSession(o->sess[outro]); o->sess[outro] = NULL; }
     if (!o->caminho[modelo]) { snprintf(o->erro, sizeof o->erro, "modelo %d não informado", modelo); return NULL; }
     OrtSession *s = o->neural ? criar(o, o->caminho[modelo], 1) : NULL;
-    if (!s) s = criar(o, o->caminho[modelo], 0);
+    if (s) o->neural_ativo |= 1 << modelo;
+    else s = criar(o, o->caminho[modelo], 0);
     if (s) o->erro[0] = 0;
     o->sess[modelo] = s;
     return s;

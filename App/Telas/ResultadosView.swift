@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import AVKit
 import Photos
@@ -171,6 +172,10 @@ struct LinhaArquivo: View {
     @State private var player: AVPlayer?
     @State private var tocando = false
     @State private var video: AVPlayer?
+    @State private var posicao: Double = 0
+    @State private var duracao: Double = 0
+    @State private var arrastando = false
+    private let relogio = Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()
 
     private var ext: String { url.pathExtension.lowercased() }
     private var ehVideo: Bool { ["mp4", "mov", "m4v", "webm", "mkv"].contains(ext) }
@@ -197,6 +202,20 @@ struct LinhaArquivo: View {
                 }
                 .buttonStyle(.glass)
             }
+            if ehAudio, player != nil, duracao > 0 {
+                VStack(spacing: 2) {
+                    Slider(value: $posicao, in: 0...duracao, onEditingChanged: { editando in
+                        arrastando = editando
+                        if !editando { player?.seek(to: CMTime(seconds: posicao, preferredTimescale: 600),
+                                                    toleranceBefore: .zero, toleranceAfter: .zero) }
+                    })
+                    .tint(Tema.acento)
+                    HStack {
+                        Text(Self.tempo(posicao)); Spacer(); Text("-" + Self.tempo(duracao - posicao))
+                    }
+                    .font(.caption2.monospacedDigit()).foregroundStyle(Tema.texto2)
+                }
+            }
             if ehVideo {
                 VideoPlayer(player: video)
                     .frame(height: 210)
@@ -209,6 +228,27 @@ struct LinhaArquivo: View {
             }
         }
         .onDisappear { player?.pause(); video?.pause(); tocando = false }
+        .onReceive(relogio) { _ in
+            guard let p = player, !arrastando else { return }
+            let t = p.currentTime().seconds
+            if t.isFinite { posicao = min(max(0, t), duracao) }
+            if tocando, duracao > 0, t >= duracao - 0.05 {       // chegou ao fim: volta ao começo
+                tocando = false
+                p.pause()
+                p.seek(to: .zero); posicao = 0
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Self.outroTocando)) { n in
+            if (n.object as? URL) != url, tocando { player?.pause(); tocando = false }
+        }
+    }
+
+    /// Avisa as outras linhas para pausarem: um áudio por vez.
+    static let outroTocando = Notification.Name("EstudioOutroAudioTocando")
+
+    private static func tempo(_ s: Double) -> String {
+        let t = Int(max(0, s).rounded())
+        return String(format: "%d:%02d", t / 60, t % 60)
     }
 
     private var tamanho: String? {
@@ -219,9 +259,18 @@ struct LinhaArquivo: View {
     private func alternarAudio() {
         if player == nil {
             try? AVAudioSession.sharedInstance().setCategory(.playback)
-            player = AVPlayer(url: url)
+            let item = AVPlayerItem(url: url)
+            player = AVPlayer(playerItem: item)
+            Task {
+                if let d = (try? await item.asset.load(.duration))?.seconds, d.isFinite { duracao = d }
+            }
         }
-        if tocando { player?.pause() } else { player?.play() }
+        if tocando {
+            player?.pause()
+        } else {
+            NotificationCenter.default.post(name: Self.outroTocando, object: url)
+            player?.play()
+        }
         tocando.toggle()
     }
 
