@@ -168,6 +168,19 @@ struct AjustesView: View {
             Toggle("Usar o Neural Engine", isOn: $vozNeuralEngine)
             Text("Desligado, o resultado é o mesmo da nuvem. Ligado pode ficar mais rápido, mas o Neural Engine faz as contas com menos precisão e o resultado pode mudar um pouco.")
                 .font(.footnote).foregroundStyle(Tema.texto2)
+            if let diag = try? String(contentsOf: Diagnostico.arquivo, encoding: .utf8), !diag.isEmpty {
+                DisclosureGroup("Diagnóstico do último tratamento") {
+                    Text(diag).font(.caption2.monospaced()).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack {
+                        Button("Copiar", systemImage: "doc.on.doc") { UIPasteboard.general.string = diag }
+                        Spacer()
+                        ShareLink(item: Diagnostico.arquivo) { Label("Compartilhar", systemImage: "square.and.arrow.up") }
+                    }
+                    .font(.footnote)
+                }
+                .font(.footnote)
+            }
             if espacoVoz > 0 {
                 HStack {
                     Text("Espaço usado: \(ByteCountFormatter.string(fromByteCount: espacoVoz, countStyle: .file))")

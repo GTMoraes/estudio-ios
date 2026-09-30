@@ -56,7 +56,7 @@ targets:
           - UIInterfaceOrientationPortrait
         UIUserInterfaceStyle: Dark
         UIFileSharingEnabled: true
-        LSSupportsOpeningDocumentsInPlace: false
+        LSSupportsOpeningDocumentsInPlace: true
         NSPhotoLibraryAddUsageDescription: Para salvar no Fotos os vídeos que você baixar.
         CFBundleURLTypes:
           - CFBundleURLName: com.gtm.estudio
