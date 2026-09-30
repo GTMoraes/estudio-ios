@@ -93,11 +93,6 @@ struct PainelImagens: View {
                 EditorRecorte(url: u, recorte: $o.recorte, proporcao: $o.proporcaoRecorte)
             }
         }
-        .alert("Nome do preset", isPresented: $pedindoNome) {
-            TextField("Ex.: WebP para o site", text: $nomeNovo)
-            Button("Salvar") { _ = meus.salvar(nome: nomeNovo, opcoes: o); nomeNovo = "" }
-            Button("Cancelar", role: .cancel) {}
-        }
     }
 
     private func carregar() async {
@@ -158,6 +153,14 @@ struct PainelImagens: View {
                 }
             }
             Text("Toque e segure um preset seu para apagar.").font(.caption).foregroundStyle(Tema.texto2)
+        }
+        // preso no cartão, não no botão laranja: lá o alerta herdava o estilo de vidro e o campo ficava esmagado
+        .alert("Nome do preset", isPresented: $pedindoNome) {
+            TextField("Ex.: WebP para o site", text: $nomeNovo)
+            Button("Salvar") { _ = meus.salvar(nome: nomeNovo, opcoes: o); nomeNovo = "" }
+            Button("Cancelar", role: .cancel) { nomeNovo = "" }
+        } message: {
+            Text("Guarda todos os ajustes de agora (menos o recorte).")
         }
     }
 
@@ -269,6 +272,16 @@ struct PainelImagens: View {
             }
             .pickerStyle(.menu)
             if o.metadados == .tudo { Toggle("Tirar GPS", isOn: $o.tirarGPS) }
+            Picker("Data", selection: $o.usarDataAtual) {
+                Text("Manter a da foto").tag(false)
+                Text("Usar agora").tag(true)
+            }
+            .pickerStyle(.segmented)
+            Text(o.metadados == .nenhum
+                 ? "Sem metadados, o Fotos usa a data em que você salvar. A escolha vale para {data} no nome."
+                 : o.usarDataAtual ? "Grava a data e hora da conversão: no Fotos, a imagem aparece como nova."
+                                   : "Mantém a data em que a foto foi tirada: no Fotos, ela vai para o dia original.")
+                .font(.footnote).foregroundStyle(Tema.texto2)
             Toggle("Converter cor para sRGB", isOn: $o.paraSRGB)
             Text("sRGB: as fotos do iPhone vêm em Display P3; convertidas, ficam com a mesma cor em qualquer tela. A rotação da foto é sempre aplicada.")
                 .font(.footnote).foregroundStyle(Tema.texto2)
@@ -276,23 +289,25 @@ struct PainelImagens: View {
     }
 
     private var nomes: some View {
-        Cartao(titulo: "Nome de saída", icone: "character.cursor.ibeam") {
-            TextField("{nome}", text: $o.padraoNome)
-                .textInputAutocapitalization(.never).autocorrectionDisabled()
-                .padding(10).background(.white.opacity(0.06), in: .rect(cornerRadius: 12))
-            Text("{nome} {n} {largura} {altura} {data} {datahora}").font(.caption.monospaced()).foregroundStyle(Tema.texto2)
-            ForEach(Array(arquivos.prefix(3).enumerated()), id: \.offset) { k, u in
-                if k < infos.count, let i = infos[k] {
-                    let t = GeometriaImagem.tamanhoFinal(i.largura, i.altura, o)
-                    let f = ConversorImagem.formatoFinal(o, tipoOriginal: i.tipo)
-                    let n = Renomear.aplicar(o.padraoNome, nome: (u.lastPathComponent as NSString).deletingPathExtension,
-                                             indice: k + 1, largura: t.0, altura: t.1, data: i.data, digitos: o.digitosContador)
-                    Text("\(u.lastPathComponent) → \(n).\(f.extensao ?? "jpg")")
-                        .font(.caption).foregroundStyle(Tema.texto2).lineLimit(1).truncationMode(.middle)
-                }
-            }
-            if arquivos.count > 3 { Text("…").font(.caption).foregroundStyle(Tema.texto2) }
+        CartaoNomeSaida(padrao: $o.padraoNome,
+                        tokens: ["{nome}", "{n}", "{largura}", "{altura}", "{data}", "{datahora}"],
+                        previa: previaNomes,
+                        nota: "{n} = número da imagem no lote; {largura}/{altura} = tamanho final; {data} = data da foto (ou agora, conforme a opção de data).")
+    }
+
+    private var previaNomes: [String] {
+        var r: [String] = []
+        for (k, u) in arquivos.prefix(3).enumerated() {
+            guard k < infos.count, let i = infos[k] else { continue }
+            let t = GeometriaImagem.tamanhoFinal(i.largura, i.altura, o)
+            let f = ConversorImagem.formatoFinal(o, tipoOriginal: i.tipo)
+            let n = Renomear.aplicar(o.padraoNome, nome: (u.lastPathComponent as NSString).deletingPathExtension,
+                                     indice: k + 1, largura: t.0, altura: t.1,
+                                     data: o.usarDataAtual ? Date() : i.data, digitos: o.digitosContador)
+            r.append("\(u.lastPathComponent) → \(n).\(f.extensao ?? "jpg")")
         }
+        if arquivos.count > 3 { r.append("…") }
+        return r
     }
 }
 

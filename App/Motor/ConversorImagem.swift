@@ -92,6 +92,13 @@ struct OpcoesImagem: Codable, Equatable {
     var metadados: ModoMetadados = .essencial
     var tirarGPS = true
     var paraSRGB = true
+    /// nil/false = mantém a data da foto; true = grava a data e hora da conversão
+    /// (opcional para os presets e ajustes já gravados continuarem abrindo)
+    var dataAgora: Bool?
+    var usarDataAtual: Bool {
+        get { dataAgora ?? false }
+        set { dataAgora = newValue }
+    }
 
     var padraoNome = "{nome}"
     var digitosContador = 3
@@ -148,19 +155,36 @@ struct BuscaQualidade {
 }
 
 enum Renomear {
-    static func aplicar(_ padrao: String, nome: String, indice: Int, largura: Int, altura: Int, data: Date, digitos: Int) -> String {
+    /// Tokens: {nome} {n} {largura} {altura} {data} {datahora}. Sem largura/altura, esses tokens somem.
+    static func aplicar(_ padrao: String, nome: String, indice: Int = 1, largura: Int? = nil, altura: Int? = nil,
+                        data: Date, digitos: Int = 3) -> String {
         var s = padrao.trimmingCharacters(in: .whitespaces).isEmpty ? "{nome}" : padrao
         let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX")
         s = s.replacingOccurrences(of: "{nome}", with: nome)
         s = s.replacingOccurrences(of: "{n}", with: String(format: "%0\(max(1, digitos))d", indice))
-        s = s.replacingOccurrences(of: "{largura}", with: String(largura))
-        s = s.replacingOccurrences(of: "{altura}", with: String(altura))
+        s = s.replacingOccurrences(of: "{largura}", with: largura.map(String.init) ?? "")
+        s = s.replacingOccurrences(of: "{altura}", with: altura.map(String.init) ?? "")
         f.dateFormat = "yyyy-MM-dd"; s = s.replacingOccurrences(of: "{data}", with: f.string(from: data))
         f.dateFormat = "yyyy-MM-dd_HH-mm"; s = s.replacingOccurrences(of: "{datahora}", with: f.string(from: data))
         let proibidos = CharacterSet(charactersIn: "/\\:*?\"<>|\n\r\t")
         s = s.components(separatedBy: proibidos).joined(separator: "_").trimmingCharacters(in: .whitespaces)
-        return s.isEmpty ? "imagem" : s
+        return s.isEmpty ? "arquivo" : s
     }
+
+    static let padrao = "{nome}"
+}
+
+struct DetalhesImagem {
+    var largura: Int, altura: Int
+    var bytes: Int64 = 0
+    var tipo: String?
+    var data: Date?
+    var camera: String?
+    var lente: String?
+    var exposicao: String?
+    var perfil: String?
+    var alfa = false
+    var gps = false
 }
 
 struct InfoImagem {
@@ -210,6 +234,52 @@ enum ConversorImagem {
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceThumbnailMaxPixelSize: lado,
         ] as CFDictionary)
+    }
+
+    /// Tudo o que a tela de detalhes mostra (estilo do "i" do app Fotos).
+    static func detalhes(_ url: URL) -> DetalhesImagem? {
+        guard let src = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let p = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
+              let l = p[kCGImagePropertyPixelWidth] as? Int, let a = p[kCGImagePropertyPixelHeight] as? Int else { return nil }
+        let o = (p[kCGImagePropertyOrientation] as? UInt32) ?? 1
+        let girada = o >= 5 && o <= 8
+        let exif = p[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
+        let tiff = p[kCGImagePropertyTIFFDictionary] as? [CFString: Any] ?? [:]
+        var d = DetalhesImagem(largura: girada ? a : l, altura: girada ? l : a)
+        d.bytes = Int64(((try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? NSNumber)?.int64Value ?? 0)
+        d.tipo = CGImageSourceGetType(src) as String?
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy:MM:dd HH:mm:ss"
+        if let s = (exif[kCGImagePropertyExifDateTimeOriginal] ?? tiff[kCGImagePropertyTIFFDateTime]) as? String {
+            d.data = f.date(from: s)
+        }
+        let marca = (tiff[kCGImagePropertyTIFFMake] as? String)?.trimmingCharacters(in: .whitespaces) ?? ""
+        let modelo = (tiff[kCGImagePropertyTIFFModel] as? String)?.trimmingCharacters(in: .whitespaces) ?? ""
+        let cam = modelo.lowercased().hasPrefix(marca.lowercased()) ? modelo : [marca, modelo].filter { !$0.isEmpty }.joined(separator: " ")
+        d.camera = cam.isEmpty ? nil : cam
+        d.lente = exif[kCGImagePropertyExifLensModel] as? String
+        var ex: [String] = []
+        if let iso = (exif[kCGImagePropertyExifISOSpeedRatings] as? [Int])?.first { ex.append("ISO \(iso)") }
+        if let mm = exif[kCGImagePropertyExifFocalLenIn35mmFilm] as? Int { ex.append("\(mm) mm") }
+        else if let mm = exif[kCGImagePropertyExifFocalLength] as? Double { ex.append(String(format: "%.1f mm", mm)) }
+        if let fn = exif[kCGImagePropertyExifFNumber] as? Double {
+            let nf = NumberFormatter(); nf.maximumFractionDigits = 2; nf.minimumFractionDigits = 0
+            ex.append("ƒ" + (nf.string(from: NSNumber(value: fn)) ?? String(fn)))
+        }
+        if let t = exif[kCGImagePropertyExifExposureTime] as? Double, t > 0 {
+            ex.append(t < 1 ? "1/\(Int((1 / t).rounded())) s" : String(format: "%.1f s", t))
+        }
+        d.exposicao = ex.isEmpty ? nil : ex.joined(separator: " · ")
+        d.perfil = p[kCGImagePropertyProfileName] as? String
+        d.alfa = (p[kCGImagePropertyHasAlpha] as? Bool) ?? false
+        d.gps = p[kCGImagePropertyGPSDictionary] != nil
+        return d
+    }
+
+    /// Nome curto do formato a partir do UTI ("public.heic" -> "HEIC").
+    static func nomeFormato(_ uti: String?) -> String {
+        guard let uti else { return "—" }
+        if uti == "org.webmproject.webp" { return "WEBP" }
+        return (UTType(uti)?.preferredFilenameExtension ?? uti.components(separatedBy: ".").last ?? uti).uppercased()
     }
 
     /// Formato de saída efetivo ("manter" vira o formato do original, quando dá para gravar).
@@ -323,15 +393,32 @@ enum ConversorImagem {
 
     // MARK: - metadados
 
+    /// Data no formato do EXIF ("2026:09:30 14:05:00") e o fuso ("-03:00").
+    static func textoExif(_ d: Date) -> (data: String, fuso: String) {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy:MM:dd HH:mm:ss"
+        let seg = TimeZone.current.secondsFromGMT(for: d)
+        let fuso = String(format: "%@%02d:%02d", seg < 0 ? "-" : "+", abs(seg) / 3600, (abs(seg) % 3600) / 60)
+        return (f.string(from: d), fuso)
+    }
+
     private static func metadados(_ p: [CFString: Any], _ o: OpcoesImagem) -> [CFString: Any] {
+        let agora = o.usarDataAtual ? textoExif(Date()) : nil
         switch o.metadados {
         case .nenhum:
             return [:]
         case .essencial:
             // só a data (a orientação já foi aplicada nos pixels)
+            if let agora {
+                return [kCGImagePropertyExifDictionary: [kCGImagePropertyExifDateTimeOriginal: agora.data,
+                                                         kCGImagePropertyExifDateTimeDigitized: agora.data,
+                                                         kCGImagePropertyExifOffsetTimeOriginal: agora.fuso,
+                                                         kCGImagePropertyExifOffsetTimeDigitized: agora.fuso] as [CFString: Any]]
+            }
             guard let exif = p[kCGImagePropertyExifDictionary] as? [CFString: Any],
                   let d = exif[kCGImagePropertyExifDateTimeOriginal] else { return [:] }
-            return [kCGImagePropertyExifDictionary: [kCGImagePropertyExifDateTimeOriginal: d]]
+            var e: [CFString: Any] = [kCGImagePropertyExifDateTimeOriginal: d]
+            if let f = exif[kCGImagePropertyExifOffsetTimeOriginal] { e[kCGImagePropertyExifOffsetTimeOriginal] = f }
+            return [kCGImagePropertyExifDictionary: e]
         case .tudo:
             var m = p
             for k in [kCGImagePropertyPixelWidth, kCGImagePropertyPixelHeight, kCGImagePropertyColorModel,
@@ -346,7 +433,27 @@ enum ConversorImagem {
             if var exif = m[kCGImagePropertyExifDictionary] as? [CFString: Any] {
                 exif.removeValue(forKey: kCGImagePropertyExifPixelXDimension)
                 exif.removeValue(forKey: kCGImagePropertyExifPixelYDimension)
+                if let agora {
+                    for k in [kCGImagePropertyExifDateTimeOriginal, kCGImagePropertyExifDateTimeDigitized] { exif[k] = agora.data }
+                    for k in [kCGImagePropertyExifOffsetTime, kCGImagePropertyExifOffsetTimeOriginal,
+                              kCGImagePropertyExifOffsetTimeDigitized] { exif[k] = agora.fuso }
+                    for k in [kCGImagePropertyExifSubsecTime, kCGImagePropertyExifSubsecTimeOriginal,
+                              kCGImagePropertyExifSubsecTimeDigitized] { exif.removeValue(forKey: k) }
+                }
                 m[kCGImagePropertyExifDictionary] = exif
+            }
+            if let agora {
+                if var tiff = m[kCGImagePropertyTIFFDictionary] as? [CFString: Any] {
+                    tiff[kCGImagePropertyTIFFDateTime] = agora.data
+                    m[kCGImagePropertyTIFFDictionary] = tiff
+                }
+                if var iptc = m[kCGImagePropertyIPTCDictionary] as? [CFString: Any] {
+                    for k in [kCGImagePropertyIPTCDateCreated, kCGImagePropertyIPTCTimeCreated,
+                              kCGImagePropertyIPTCDigitalCreationDate, kCGImagePropertyIPTCDigitalCreationTime] {
+                        iptc.removeValue(forKey: k)
+                    }
+                    m[kCGImagePropertyIPTCDictionary] = iptc
+                }
             }
             if o.tirarGPS { m.removeValue(forKey: kCGImagePropertyGPSDictionary) }
             m[kCGImagePropertyOrientation] = 1

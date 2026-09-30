@@ -140,9 +140,10 @@ final class Estudio {
         return Nuvem.limpar(b.isEmpty ? "arquivo" : b)
     }
 
-    private func novoItem(_ tipo: Item.Tipo, _ titulo: String, nuvem: Bool, mensagem: String) -> UUID {
+    private func novoItem(_ tipo: Item.Tipo, _ titulo: String, nuvem: Bool, mensagem: String, base: String? = nil) -> UUID {
         var i = Item(tipo: tipo, titulo: titulo, naNuvem: nuvem)
         i.mensagem = mensagem
+        i.baseSaida = base
         historico.adicionar(i)
         abaSelecionada = 1
         return i.id
@@ -190,11 +191,12 @@ final class Estudio {
 
     // --- transcrição
 
-    func transcrever(_ arquivo: URL, nome: String, naNuvem: Bool, idioma: String) {
-        let id = novoItem(.transcricao, nome, nuvem: naNuvem, mensagem: naNuvem ? "Enviando para a nuvem" : "Preparando")
+    func transcrever(_ arquivo: URL, nome: String, naNuvem: Bool, idioma: String,
+                     padrao: String = Renomear.padrao, data: Date = Date()) {
+        let base = PadraoNome.base(nome, padrao: padrao, data: data)
+        let id = novoItem(.transcricao, nome, nuvem: naNuvem, mensagem: naNuvem ? "Enviando para a nuvem" : "Preparando", base: base)
         let inicio = Date()
         rodar(id) {
-            let base = Self.base(nome)
             if naNuvem {
                 let uid = try await self.nuvem.enviar(arquivo, nome: nome) { p in
                     Task { @MainActor in self.etapa(id, "Enviando para a nuvem", p) }
@@ -243,14 +245,18 @@ final class Estudio {
 
     // --- tratar voz (no iPhone ou na nuvem)
 
-    func tratarVoz(_ arquivo: URL, nome: String, opcoes: OpcoesVoz, quadra: Bool, naNuvem: Bool) {
-        let id = novoItem(.voz, nome, nuvem: naNuvem, mensagem: naNuvem ? "Enviando para a nuvem" : "Preparando")
+    func tratarVoz(_ arquivo: URL, nome: String, opcoes: OpcoesVoz, quadra: Bool, naNuvem: Bool,
+                   padrao: String = Renomear.padrao, data: Date = Date()) {
+        let base = PadraoNome.base(nome, padrao: padrao, data: data)
+        let personalizado = PadraoNome.personalizado(padrao)
+        let id = novoItem(.voz, nome, nuvem: naNuvem, mensagem: naNuvem ? "Enviando para a nuvem" : "Preparando",
+                          base: personalizado ? base : nil)
         let inicio = Date()
         if !naNuvem {
             rodar(id) {
                 guard let item = self.historico.item(id) else { return }
                 let r = try await VozLocal.tratar(arquivo, opcoes: OpcoesVozLocal(voz: opcoes, quadra: quadra),
-                                                  pasta: item.pasta, base: Self.base(nome)) { msg, p in
+                                                  pasta: item.pasta, base: base) { msg, p in
                     Task { @MainActor in self.etapa(id, msg, p) }
                 }
                 self.concluir(id, arquivos: r.arquivos, inicio: inicio, duracao: r.duracao)
@@ -265,18 +271,23 @@ final class Estudio {
             let job = try await self.nuvem.iniciarVoz(uploadID: uid, opcoes: opcoes)
             self.historico.atualizar(id) { $0.trabalho = job }
             let r = try await self.nuvem.aguardar(job) { m in Task { @MainActor in self.etapa(id, m) } }
-            try await self.guardarVozDaNuvem(id, r, inicio: inicio)
+            try await self.guardarVozDaNuvem(id, r, inicio: inicio, base: personalizado ? base : nil)
             try? FileManager.default.removeItem(at: arquivo)
         }
     }
 
-    private func guardarVozDaNuvem(_ id: UUID, _ r: [String: Any], inicio: Date) async throws {
+    /// base: nome de saída personalizado (os arquivos ficam base-mix-tratado.mp3 etc., como no iPhone).
+    private func guardarVozDaNuvem(_ id: UUID, _ r: [String: Any], inicio: Date, base: String? = nil) async throws {
         guard let item = historico.item(id), let vid = r["id"] as? Int else { throw ErroApp("Resposta incompleta da nuvem.") }
         let tipos = (r["arquivos"] as? [String]) ?? ["mix", "voz", "trilha"]
         var nomes: [String] = []
         for (k, t) in tipos.enumerated() {
-            let u = try await nuvem.baixar("api/voz/\(vid)/\(t)", para: item.pasta, nomePadrao: "\(t).mp3") { p in
+            var u = try await nuvem.baixar("api/voz/\(vid)/\(t)", para: item.pasta, nomePadrao: "\(t).mp3") { p in
                 Task { @MainActor in self.etapa(id, "Baixando o resultado (\(k + 1) de \(tipos.count))", p) }
+            }
+            if let base {
+                let sufixo = ["mix": "-mix-tratado", "voz": "-voz-tratada", "trilha": "-trilha-separada"][t] ?? "-\(t)"
+                u = PadraoNome.renomear(u, base: base, sufixo: sufixo)
             }
             nomes.append(u.lastPathComponent)
         }
@@ -285,14 +296,18 @@ final class Estudio {
 
     // --- conversão (no iPhone)
 
-    func converter(_ arquivo: URL, nome: String, info: InfoMidia, opcoes: OpcoesConversao) {
+    func converter(_ arquivo: URL, nome: String, info: InfoMidia, opcoes: OpcoesConversao,
+                   padrao: String = Renomear.padrao, data: Date = Date()) {
         let tipo: Item.Tipo = opcoes.acao == .audio || !info.temVideo ? .audio : .video
+        let dims: (Int, Int)? = tipo != .video ? nil
+            : opcoes.acao == .semRecodificar ? (info.largura, info.altura) : PlanoConversao.dimensoes(info, opcoes)
+        let base = PadraoNome.base(nome, padrao: padrao, data: data, largura: dims?.0, altura: dims?.1)
         let id = novoItem(tipo, nome, nuvem: false, mensagem: "Convertendo no iPhone")
         let inicio = Date()
         rodar(id) {
             guard let item = self.historico.item(id) else { return }
             let saida = try await ConversorVideo.converter(arquivo, info: info, opcoes: opcoes, pasta: item.pasta,
-                                                           base: Self.base(nome)) { p in
+                                                           base: base) { p in
                 Task { @MainActor in self.etapa(id, "Convertendo no iPhone", p) }
             }
             self.concluir(id, arquivos: [saida.lastPathComponent], inicio: inicio,
@@ -313,28 +328,34 @@ final class Estudio {
             var nomes: [String] = []
             var usados = Set<String>()
             var falhas: [String] = []
+            var origens: [String: OrigemImagem] = [:]
             for (k, u) in arquivos.enumerated() {
                 try Task.checkCancellation()
                 self.etapa(id, "Convertendo \(k + 1) de \(arquivos.count)", Double(k) / Double(arquivos.count))
                 let pasta = item.pasta
                 let jaUsados = usados
                 do {
-                    let nome: String = try await Task.detached(priority: .userInitiated) {
+                    let (nome, origem): (String, OrigemImagem) = try await Task.detached(priority: .userInitiated) {
                         guard let info = ConversorImagem.info(u) else { throw ErroApp("não é uma imagem que o iPhone lê") }
                         let formato = ConversorImagem.formatoFinal(opcoes, tipoOriginal: info.tipo)
                         let (l, a) = GeometriaImagem.tamanhoFinal(info.largura, info.altura, opcoes)
                         let base = Renomear.aplicar(opcoes.padraoNome, nome: (u.lastPathComponent as NSString).deletingPathExtension,
-                                                    indice: k + 1, largura: l, altura: a, data: info.data, digitos: opcoes.digitosContador)
+                                                    indice: k + 1, largura: l, altura: a,
+                                                    data: opcoes.usarDataAtual ? Date() : info.data, digitos: opcoes.digitosContador)
+                        let bytes = ((try? FileManager.default.attributesOfItem(atPath: u.path))?[.size] as? NSNumber)?.int64Value ?? 0
+                        let origem = OrigemImagem(nome: u.lastPathComponent, largura: info.largura, altura: info.altura,
+                                                  bytes: bytes, tipo: info.tipo, data: info.data)
                         let ext = formato.extensao ?? "jpg"
                         var nome = base + "." + ext, n = 2
                         while jaUsados.contains(nome.lowercased()) || FileManager.default.fileExists(atPath: pasta.appendingPathComponent(nome).path) {
                             nome = "\(base) (\(n)).\(ext)"; n += 1
                         }
                         try ConversorImagem.converter(u, opcoes, destino: pasta.appendingPathComponent(nome))
-                        return nome
+                        return (nome, origem)
                     }.value
                     usados.insert(nome.lowercased())
                     nomes.append(nome)
+                    origens[nome] = origem
                 } catch is CancellationError {
                     throw CancellationError()
                 } catch {
@@ -342,6 +363,7 @@ final class Estudio {
                 }
             }
             if nomes.isEmpty { throw ErroApp(falhas.first ?? "Nenhuma imagem convertida.") }
+            self.historico.atualizar(id) { $0.origens = origens }
             self.concluir(id, arquivos: nomes,
                           resumo: falhas.isEmpty ? nil : "Não converti \(falhas.count): " + falhas.joined(separator: "; "),
                           inicio: inicio)
@@ -352,26 +374,30 @@ final class Estudio {
     // --- links (baixados sempre pela nuvem)
 
     /// modo: "video" ou "audio"
-    func baixarLink(_ info: InfoLink, modo: String) {
-        let id = novoItem(modo == "video" ? .video : .audio, info.titulo, nuvem: true, mensagem: "Pedindo à nuvem")
+    func baixarLink(_ info: InfoLink, modo: String, padrao: String = Renomear.padrao) {
+        let personalizado = PadraoNome.personalizado(padrao)
+        let base = PadraoNome.base(info.titulo, padrao: padrao, data: Date())
+        let id = novoItem(modo == "video" ? .video : .audio, info.titulo, nuvem: true, mensagem: "Pedindo à nuvem",
+                          base: personalizado ? base : nil)
         let inicio = Date()
         rodar(id) {
             let job = try await self.nuvem.iniciarLink(info.link, modo: modo, idioma: self.idioma, titulo: info.titulo)
             self.historico.atualizar(id) { $0.trabalho = job }
             let r = try await self.nuvem.aguardar(job) { m in Task { @MainActor in self.etapa(id, m) } }
             guard let tid = r["id"] as? Int, let item = self.historico.item(id) else { throw ErroApp("Resposta incompleta da nuvem.") }
-            let u = try await self.nuvem.baixar("api/transcripts/\(tid)/\(modo)", para: item.pasta,
-                                                nomePadrao: Self.base(info.titulo) + (modo == "video" ? ".mp4" : ".m4a")) { p in
+            var u = try await self.nuvem.baixar("api/transcripts/\(tid)/\(modo)", para: item.pasta,
+                                                nomePadrao: base + (modo == "video" ? ".mp4" : ".m4a")) { p in
                 Task { @MainActor in self.etapa(id, "Baixando para o iPhone", p) }
             }
+            if personalizado { u = PadraoNome.renomear(u, base: base) }
             self.concluir(id, arquivos: [u.lastPathComponent], inicio: inicio, duracao: info.duracao)
         }
     }
 
-    func transcreverLink(_ info: InfoLink, naNuvem: Bool, idioma: String) {
-        let id = novoItem(.transcricao, info.titulo, nuvem: naNuvem, mensagem: "Pedindo à nuvem")
+    func transcreverLink(_ info: InfoLink, naNuvem: Bool, idioma: String, padrao: String = Renomear.padrao) {
+        let base = PadraoNome.base(info.titulo, padrao: padrao, data: Date())
+        let id = novoItem(.transcricao, info.titulo, nuvem: naNuvem, mensagem: "Pedindo à nuvem", base: base)
         let inicio = Date()
-        let base = Self.base(info.titulo)
         rodar(id) {
             if naNuvem {
                 let job = try await self.nuvem.iniciarLink(info.link, modo: "transcribe", idioma: idioma, titulo: info.titulo)
@@ -406,20 +432,22 @@ final class Estudio {
         }
         for i in historico.itens where i.estado == .processando && tarefas[i.id] == nil {
             if i.naNuvem, let job = i.trabalho {
-                let id = i.id, inicio = i.criado, base = Self.base(i.titulo), tipo = i.tipo
+                let id = i.id, inicio = i.criado, base = i.baseSaida ?? Self.base(i.titulo), tipo = i.tipo
+                let personalizado = i.baseSaida != nil
                 rodar(id) {
                     let r = try await self.nuvem.aguardar(job) { m in Task { @MainActor in self.etapa(id, m) } }
                     switch tipo {
                     case .transcricao: try await self.guardarTranscricaoDaNuvem(id, r, base: base, inicio: inicio)
-                    case .voz: try await self.guardarVozDaNuvem(id, r, inicio: inicio)
+                    case .voz: try await self.guardarVozDaNuvem(id, r, inicio: inicio, base: personalizado ? base : nil)
                     case .imagem: break           // imagens nunca vão para a nuvem
                     case .video, .audio:
                         guard let tid = r["id"] as? Int, let item = self.historico.item(id) else { throw ErroApp("Resposta incompleta da nuvem.") }
                         let modo = tipo == .video ? "video" : "audio"
-                        let u = try await self.nuvem.baixar("api/transcripts/\(tid)/\(modo)", para: item.pasta,
+                        var u = try await self.nuvem.baixar("api/transcripts/\(tid)/\(modo)", para: item.pasta,
                                                             nomePadrao: base + (tipo == .video ? ".mp4" : ".m4a")) { p in
                             Task { @MainActor in self.etapa(id, "Baixando para o iPhone", p) }
                         }
+                        if personalizado { u = PadraoNome.renomear(u, base: base) }
                         self.concluir(id, arquivos: [u.lastPathComponent], inicio: inicio)
                     }
                 }

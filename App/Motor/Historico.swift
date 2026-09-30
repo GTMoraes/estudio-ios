@@ -19,6 +19,8 @@ struct Item: Codable, Identifiable, Equatable {
     var trabalho: String?             // job_id na nuvem (para retomar)
     var duracaoAudio: Double?
     var duracaoProcesso: Double?
+    var baseSaida: String?            // nome de saída escolhido (padrão de nome), para retomar da nuvem
+    var origens: [String: OrigemImagem]?   // imagens: arquivo convertido -> como era o original
 
     var pasta: URL { Historico.pastaResultados.appendingPathComponent(id.uuidString, isDirectory: true) }
     func url(_ nome: String) -> URL { pasta.appendingPathComponent(nome) }
@@ -32,6 +34,16 @@ struct Item: Codable, Identifiable, Equatable {
         case .imagem: return "photo"
         }
     }
+}
+
+/// Como era a imagem original (para comparar na tela de detalhes; o original é apagado).
+struct OrigemImagem: Codable, Equatable {
+    var nome: String
+    var largura: Int
+    var altura: Int
+    var bytes: Int64
+    var tipo: String?
+    var data: Date?
 }
 
 @MainActor

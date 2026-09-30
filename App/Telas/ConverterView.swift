@@ -16,6 +16,8 @@ struct PainelConverter: View {
     @State private var pedindoNome = false
     @State private var nomeNovo = ""
     @State private var meus = MeusPresets.shared
+    @State private var padrao = PadraoNome.ler(.conversao)
+    @State private var dataOriginal = Date()
 
     private let personalizado = "p:" + PresetConversao.personalizado.rawValue
 
@@ -33,6 +35,7 @@ struct PainelConverter: View {
     private func carregar() async {
         do {
             let i = try await InfoMidia.ler(arquivo)
+            dataOriginal = await DataMidia.ler(arquivo)
             info = i
             let inicial: PresetConversao = !i.temVideo ? .audio : (i.hdr != .sdr ? .instagramHDR : .instagramSDR)
             escolher("p:" + inicial.rawValue)
@@ -62,6 +65,14 @@ struct PainelConverter: View {
     /// Mexer num ajuste troca a predefinição para "Personalizado" (os controles mandam).
     private func ajuste<T>(_ kp: WritableKeyPath<OpcoesConversao, T>) -> Binding<T> {
         Binding(get: { o[keyPath: kp] }, set: { o[keyPath: kp] = $0; selecao = personalizado })
+    }
+
+    private var extensaoSaida: String {
+        switch o.acao {
+        case .video: return "mp4"
+        case .semRecodificar: return arquivo.pathExtension.lowercased() == "mp4" ? "mp4" : "mov"
+        case .audio: return o.formatoAudio.rawValue
+        }
     }
 
     private var presetEmbutido: PresetConversao? {
@@ -142,6 +153,16 @@ struct PainelConverter: View {
 
         PainelTrecho(arquivo: arquivo, info: info, inicio: $o.inicio, fim: $o.fim)
 
+        let ehVideo = o.acao != .audio && info.temVideo
+        let dimsSaida = o.acao == .semRecodificar ? (info.largura, info.altura) : PlanoConversao.dimensoes(info, o)
+        CartaoNomeSaida(padrao: $padrao,
+                        tokens: ehVideo ? ["{nome}", "{data}", "{datahora}", "{largura}", "{altura}"] : ["{nome}", "{data}", "{datahora}"],
+                        previa: [PadraoNome.base(nome, padrao: padrao, data: dataOriginal,
+                                                 largura: ehVideo ? dimsSaida.0 : nil, altura: ehVideo ? dimsSaida.1 : nil)
+                                 + "." + extensaoSaida],
+                        nota: "{data} e {datahora} = quando o vídeo/áudio foi gravado (se o arquivo não disser, a data do arquivo)."
+                              + (ehVideo ? " {largura} e {altura} = tamanho do resultado." : ""))
+
         Cartao {
             avisos(info)
             if o.acao == .video {
@@ -160,7 +181,8 @@ struct PainelConverter: View {
                     .monospacedDigit().fontWeight(.semibold)
             }
             BotaoPrincipal(titulo: "Converter", icone: "arrow.triangle.2.circlepath") {
-                estudio.converter(arquivo, nome: nome, info: info, opcoes: o); fechar()
+                PadraoNome.gravar(padrao, .conversao)
+                estudio.converter(arquivo, nome: nome, info: info, opcoes: o, padrao: padrao, data: dataOriginal); fechar()
             }
         }
     }

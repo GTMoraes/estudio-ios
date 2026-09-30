@@ -46,6 +46,17 @@ nada muda no servidor. A senha fica no Keychain do iPhone para renovar a sessão
 - WebP pela libwebp 1.5.0 (`scripts/compilar-codificadores.sh`), com EXIF e perfil ICC.
 - Alvo em KB: busca a maior qualidade (30–95) que cabe no tamanho, em até 7 tentativas.
 - JPG/HEIC saem pelo codificador da Apple: não ficam idênticos aos do ConversorMidia no Windows.
+- Data: manter a da foto ou gravar a data e hora da conversão (EXIF, TIFF; datas IPTC removidas).
+- Resultado: grade de miniaturas; tocar abre em tela cheia (pinça/toque duplo para zoom) com as
+  informações e a comparação com o original (formato, resolução, tamanho), guardadas no histórico.
+
+## Nome de saída
+
+Todos os trabalhos têm o cartão "Nome de saída" (`App/Telas/NomeSaidaView.swift`,
+`App/Motor/NomeSaida.swift`). Tokens: `{nome}` `{data}` `{datahora}`; na conversão de vídeo
+também `{largura}` `{altura}` (do resultado); nas imagens também `{n}`. Em áudio/vídeo, `{data}`
+é a data de gravação do arquivo; em links, agora. O padrão fica guardado por tipo de trabalho.
+Na voz, os sufixos (`-mix-tratado`, `-voz-tratada`, `-trilha-separada`) continuam depois do nome.
 
 ## Como gerar o IPA (sem Mac)
 

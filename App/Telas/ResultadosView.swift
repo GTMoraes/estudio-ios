@@ -124,7 +124,11 @@ struct DetalheView: View {
                             .buttonStyle(.glassProminent)
                         }
                     }
-                    if item.estado == .pronto {
+                    if item.estado == .pronto, item.tipo == .imagem {
+                        Cartao(titulo: item.arquivos.count == 1 ? "Imagem" : "\(item.arquivos.count) imagens", icone: "photo.on.rectangle") {
+                            GradeImagens(item: item)
+                        }
+                    } else if item.estado == .pronto {
                         Cartao(titulo: "Arquivos", icone: "folder.fill") {
                             ForEach(item.arquivos, id: \.self) { nome in
                                 LinhaArquivo(url: item.url(nome), aviso: $aviso)

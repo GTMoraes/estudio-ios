@@ -72,6 +72,9 @@ struct PainelLink: View {
     @State private var erro: String?
     @State private var naNuvem = UserDefaults.standard.bool(forKey: "nuvemPorPadrao")
     @State private var idioma = UserDefaults.standard.string(forKey: "idioma") ?? "pt"
+    @State private var padrao = PadraoNome.ler(.link)
+
+    private func usar() { PadraoNome.gravar(padrao, .link) }
 
     var body: some View {
         Group {
@@ -85,14 +88,17 @@ struct PainelLink: View {
                     }
                     .font(.subheadline).foregroundStyle(Tema.texto2)
                 }
+                let b = PadraoNome.base(info.titulo, padrao: padrao, data: Date())
+                CartaoNomeSaida(padrao: $padrao, previa: [b + ".mp4 / .m4a / .txt"],
+                                nota: "{nome} = título do vídeo; {data} e {datahora} = agora. Vale para baixar e transcrever.")
                 Cartao(titulo: "Baixar", icone: "arrow.down.circle.fill") {
                     GlassEffectContainer(spacing: 12) {
                         HStack(spacing: 12) {
-                            Button { estudio.baixarLink(info, modo: "video"); fechar() } label: {
+                            Button { usar(); estudio.baixarLink(info, modo: "video", padrao: padrao); fechar() } label: {
                                 Label("Vídeo", systemImage: "film").frame(maxWidth: .infinity).padding(.vertical, 6)
                             }
                             .buttonStyle(.glassProminent).tint(Tema.acento)
-                            Button { estudio.baixarLink(info, modo: "audio"); fechar() } label: {
+                            Button { usar(); estudio.baixarLink(info, modo: "audio", padrao: padrao); fechar() } label: {
                                 Label("Só o áudio", systemImage: "music.note").frame(maxWidth: .infinity).padding(.vertical, 6)
                             }
                             .buttonStyle(.glass)
@@ -102,7 +108,7 @@ struct PainelLink: View {
                 Cartao(titulo: "Transcrever", icone: "text.quote") {
                     OpcoesTranscricao(naNuvem: $naNuvem, idioma: $idioma)
                     BotaoPrincipal(titulo: "Transcrever", icone: "text.badge.checkmark") {
-                        estudio.transcreverLink(info, naNuvem: naNuvem, idioma: idioma); fechar()
+                        usar(); estudio.transcreverLink(info, naNuvem: naNuvem, idioma: idioma, padrao: padrao); fechar()
                     }
                 }
             } else if let erro {
@@ -151,6 +157,17 @@ struct PainelArquivo: View {
     @State private var idioma = UserDefaults.standard.string(forKey: "idioma") ?? "pt"
     @State private var voz = OpcoesVoz.padrao(.fala)
     @State private var quadra = false
+    @State private var padraoTrans = PadraoNome.ler(.transcricao)
+    @State private var padraoVoz = PadraoNome.ler(.voz)
+    @State private var dataOriginal = Date()
+
+    private let notaData = "{data} e {datahora} = quando o áudio/vídeo foi gravado (se o arquivo não disser, a data do arquivo)."
+
+    private func nomesVoz(_ b: String) -> [String] {
+        let suf = quadra && !naNuvem ? "-quadra" : ""
+        return voz.modo == .soVoz ? ["\(b)-voz-tratada\(suf).mp3"]
+            : ["\(b)-mix-tratado\(suf).mp3", "\(b)-voz-tratada\(suf).mp3", "\(b)-trilha-separada\(suf).mp3"]
+    }
 
     var body: some View {
         Cartao {
@@ -159,7 +176,10 @@ struct PainelArquivo: View {
                 Text(d).font(.subheadline).foregroundStyle(Tema.texto2)
             }
         }
-        .task { duracao = await AudioUtil.duracao(arquivo) }
+        .task {
+            duracao = await AudioUtil.duracao(arquivo)
+            dataOriginal = await DataMidia.ler(arquivo)
+        }
 
         Picker("O que fazer", selection: $acao) {
             ForEach(Acao.allCases) { Text($0.rawValue).tag($0) }
@@ -174,9 +194,13 @@ struct PainelArquivo: View {
                 OpcoesTranscricao(naNuvem: $naNuvem, idioma: $idioma)
                 Text("Sai o texto completo (.txt) e a legenda com tempos (.srt).")
                     .font(.footnote).foregroundStyle(Tema.texto2)
-                BotaoPrincipal(titulo: "Transcrever", icone: "text.badge.checkmark") {
-                    estudio.transcrever(arquivo, nome: nome, naNuvem: naNuvem, idioma: idioma); fechar()
-                }
+            }
+            let bt = PadraoNome.base(nome, padrao: padraoTrans, data: dataOriginal)
+            CartaoNomeSaida(padrao: $padraoTrans, previa: [bt + ".txt", bt + ".srt"], nota: notaData)
+            BotaoPrincipal(titulo: "Transcrever", icone: "text.badge.checkmark") {
+                PadraoNome.gravar(padraoTrans, .transcricao)
+                estudio.transcrever(arquivo, nome: nome, naNuvem: naNuvem, idioma: idioma,
+                                    padrao: padraoTrans, data: dataOriginal); fechar()
             }
         case .voz:
             Cartao(titulo: "Tratar voz", icone: "waveform") {
@@ -209,9 +233,13 @@ struct PainelArquivo: View {
                              : ModelosVoz.prontos ? "Roda no iPhone, sem internet. Deixe o app aberto até terminar."
                              : "Roda no iPhone. A 1ª vez baixa e prepara os modelos de voz (580 MB, uma vez só).")
                     .font(.footnote).foregroundStyle(Tema.texto2)
-                BotaoPrincipal(titulo: "Tratar voz", icone: "wand.and.stars") {
-                    estudio.tratarVoz(arquivo, nome: nome, opcoes: voz, quadra: quadra && !naNuvem, naNuvem: naNuvem); fechar()
-                }
+            }
+            CartaoNomeSaida(padrao: $padraoVoz,
+                            previa: nomesVoz(PadraoNome.base(nome, padrao: padraoVoz, data: dataOriginal)), nota: notaData)
+            BotaoPrincipal(titulo: "Tratar voz", icone: "wand.and.stars") {
+                PadraoNome.gravar(padraoVoz, .voz)
+                estudio.tratarVoz(arquivo, nome: nome, opcoes: voz, quadra: quadra && !naNuvem, naNuvem: naNuvem,
+                                  padrao: padraoVoz, data: dataOriginal); fechar()
             }
         }
     }
