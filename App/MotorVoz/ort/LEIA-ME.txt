@@ -1,3 +1,7 @@
-onnxruntime_c_api.h: cabeçalho da API C do ONNX Runtime 1.22 (licença MIT, Microsoft).
-A biblioteca vem do pacote Swift onnxruntime-swift-package-manager (1.24.2); a API C
-é compatível para trás, então pedir a versão 22 da API a uma biblioteca 1.24 funciona.
+onnxruntime_c_api.h: cabeçalho da API C do ONNX Runtime 1.19.2 (licença MIT, Microsoft),
+a mesma versão da biblioteca que vem do pacote Swift onnxruntime-swift-package-manager 1.19.2.
+
+Por que 1.19.2 e não a mais nova (1.24): a partir da 1.2x o ONNX Runtime usa, nos chips com
+SME (iPhone 17), as rotinas KleidiAI para convolução, que montam uma cópia expandida da imagem
+inteira na memória (~1,4 GB por camada no modelo de separação). O app passava de 3,5 GB e o
+iOS o encerrava. A 1.19.2 não tem esse caminho e não há opção para desligá-lo nas versões novas.
