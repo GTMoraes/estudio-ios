@@ -213,11 +213,23 @@ final class Estudio {
         concluir(id, arquivos: nomes, resumo: String(texto.prefix(400)), inicio: inicio, duracao: r["audio_secs"] as? Double)
     }
 
-    // --- tratar voz (nesta versão, só na nuvem)
+    // --- tratar voz (no iPhone ou na nuvem)
 
-    func tratarVoz(_ arquivo: URL, nome: String, opcoes: OpcoesVoz) {
-        let id = novoItem(.voz, nome, nuvem: true, mensagem: "Enviando para a nuvem")
+    func tratarVoz(_ arquivo: URL, nome: String, opcoes: OpcoesVoz, quadra: Bool, naNuvem: Bool) {
+        let id = novoItem(.voz, nome, nuvem: naNuvem, mensagem: naNuvem ? "Enviando para a nuvem" : "Preparando")
         let inicio = Date()
+        if !naNuvem {
+            rodar(id) {
+                guard let item = self.historico.item(id) else { return }
+                let r = try await VozLocal.tratar(arquivo, opcoes: OpcoesVozLocal(voz: opcoes, quadra: quadra),
+                                                  pasta: item.pasta, base: Self.base(nome)) { msg, p in
+                    Task { @MainActor in self.etapa(id, msg, p) }
+                }
+                self.concluir(id, arquivos: r.arquivos, inicio: inicio, duracao: r.duracao)
+                try? FileManager.default.removeItem(at: arquivo)
+            }
+            return
+        }
         rodar(id) {
             let uid = try await self.nuvem.enviar(arquivo, nome: nome) { p in
                 Task { @MainActor in self.etapa(id, "Enviando para a nuvem", p) }

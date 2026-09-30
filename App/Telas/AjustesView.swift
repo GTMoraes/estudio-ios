@@ -14,6 +14,10 @@ struct AjustesView: View {
     @State private var baixando: Double?
     @State private var msgModelo: String?
     @State private var espaco: Int64 = 0
+    @AppStorage("vozNeuralEngine") private var vozNeuralEngine = false
+    @State private var baixandoVoz: Double?
+    @State private var msgVoz: String?
+    @State private var espacoVoz: Int64 = 0
 
     var body: some View {
         NavigationStack {
@@ -31,6 +35,7 @@ struct AjustesView: View {
                         .pickerStyle(.segmented)
                     }
                     modeloLocalCartao
+                    vozCartao
                     Cartao(titulo: "Sobre", icone: "info.circle") {
                         let v = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
                         Text("Estúdio \(v)").font(.subheadline)
@@ -43,7 +48,7 @@ struct AjustesView: View {
             }
             .telaEscura()
             .navigationTitle("Ajustes")
-            .onAppear { espaco = TranscritorLocal.tamanhoEmDisco() }
+            .onAppear { espaco = TranscritorLocal.tamanhoEmDisco(); espacoVoz = ModelosVoz.tamanhoEmDisco() }
         }
     }
 
@@ -128,6 +133,48 @@ struct AjustesView: View {
                             await TranscritorLocal.shared.apagarModelos()
                             espaco = TranscritorLocal.tamanhoEmDisco()
                         }
+                    }
+                    .font(.footnote)
+                }
+            }
+        }
+    }
+
+    // MARK: voz no iPhone
+
+    @ViewBuilder private var vozCartao: some View {
+        Cartao(titulo: "Tratar voz no iPhone", icone: "waveform") {
+            let pronto = espacoVoz == ModelosVoz.totalBytes
+            Label(pronto ? "Modelos de voz baixados" : "Modelos de voz ainda não baixados (290 MB)",
+                  systemImage: pronto ? "checkmark.circle.fill" : "arrow.down.circle")
+                .foregroundStyle(pronto ? .green : Tema.texto2)
+            if let baixandoVoz { ProgressView(value: baixandoVoz).tint(Tema.acento) }
+            if let msgVoz { Text(msgVoz).font(.footnote).foregroundStyle(Tema.texto2) }
+            if !pronto {
+                BotaoPrincipal(titulo: "Baixar agora", icone: "arrow.down.circle.fill", desativado: baixandoVoz != nil) {
+                    baixandoVoz = 0; msgVoz = nil
+                    Task {
+                        do {
+                            try await ModelosVoz.baixar { p in Task { @MainActor in if baixandoVoz != nil { baixandoVoz = p } } }
+                            msgVoz = "Pronto."
+                        } catch {
+                            msgVoz = "Falhou: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
+                        }
+                        baixandoVoz = nil
+                        espacoVoz = ModelosVoz.tamanhoEmDisco()
+                    }
+                }
+            }
+            Toggle("Usar o Neural Engine", isOn: $vozNeuralEngine)
+            Text("Desligado, o resultado é o mesmo da nuvem. Ligado pode ficar mais rápido, mas o Neural Engine faz as contas com menos precisão e o resultado pode mudar um pouco.")
+                .font(.footnote).foregroundStyle(Tema.texto2)
+            if espacoVoz > 0 {
+                HStack {
+                    Text("Espaço usado: \(ByteCountFormatter.string(fromByteCount: espacoVoz, countStyle: .file))")
+                        .font(.footnote).foregroundStyle(Tema.texto2)
+                    Spacer()
+                    Button("Apagar modelos", role: .destructive) {
+                        ModelosVoz.apagar(); espacoVoz = ModelosVoz.tamanhoEmDisco()
                     }
                     .font(.footnote)
                 }

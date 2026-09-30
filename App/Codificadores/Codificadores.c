@@ -62,6 +62,12 @@ int cod_mp3_fechar(CodMP3 *c) {
     if (c->lame && c->f && c->buf) {
         int r = lame_encode_flush(c->lame, c->buf, c->tambuf);
         if (r > 0 && fwrite(c->buf, 1, (size_t)r, c->f) != (size_t)r) erro = -2;
+        /* quadro "Info" do LAME no começo do arquivo: diz aos tocadores o atraso do
+           codificador e o preenchimento do fim, para o áudio não sair deslocado */
+        size_t t = lame_get_lametag_frame(c->lame, c->buf, (size_t)c->tambuf);
+        if (!erro && t > 0 && t <= (size_t)c->tambuf) {
+            if (fseek(c->f, 0, SEEK_SET) != 0 || fwrite(c->buf, 1, t, c->f) != t) erro = -2;
+        }
     }
     if (c->lame) lame_close(c->lame);
     if (c->f && fclose(c->f) != 0) erro = -3;

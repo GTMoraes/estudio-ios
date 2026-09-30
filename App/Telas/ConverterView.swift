@@ -364,10 +364,13 @@ struct PainelConverter: View {
                 Label("O HDR vai virar SDR (conversão feita pelo iOS).", systemImage: "sun.max.trianglebadge.exclamationmark")
                     .font(.footnote).foregroundStyle(.yellow)
             }
-            if info.dolbyVision {
-                Label("O Dolby Vision vai se perder ao recodificar (fica o HDR comum, se mantido). Para manter, use \"sem recodificar\".",
-                      systemImage: "exclamationmark.triangle")
+            if info.dolbyVision && !PlanoConversao.hdrSaida(info, o) {
+                Label("O Dolby Vision vai se perder (a saída é SDR).", systemImage: "exclamationmark.triangle")
                     .font(.footnote).foregroundStyle(.yellow)
+            } else if PlanoConversao.hdrSaida(info, o) {
+                Label("HEVC HDR: o iPhone gera o Dolby Vision (perfil 8.4, compatível com HLG) no arquivo novo.",
+                      systemImage: "checkmark.seal")
+                    .font(.footnote).foregroundStyle(Tema.texto2)
             }
         }
         if o.acao == .semRecodificar {

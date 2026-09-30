@@ -156,7 +156,7 @@ enum PresetConversao: String, CaseIterable, Identifiable {
 
     var dica: String {
         switch self {
-        case .instagramHDR: return "Mantém o HDR (HLG/BT.2020, 10 bits); 1080p (1920×1080 deitado, 1080×1920 em pé). O Dolby Vision vira HDR comum (para manter, use \"sem recodificar\")."
+        case .instagramHDR: return "Mantém o HDR (HLG/BT.2020, 10 bits); 1080p (1920×1080 deitado, 1080×1920 em pé). Sai com Dolby Vision 8.4 (o iPhone gera de novo)."
         case .instagramCopia: return "Copia o vídeo sem recodificar: perda zero, mantém até o Dolby Vision. Mesmo tamanho do original."
         case .instagramSDR: return "H.264 1080p; vídeo HDR é convertido para SDR pelo próprio iOS."
         case .qualidade: return "Mantém resolução e fps, HEVC com taxa alta; áudio copiado quando dá."

@@ -3,19 +3,38 @@
 App de iPhone que junta o whisper.frx9.com e o ConversorMidia: baixar links (YouTube, Instagram…),
 transcrever (texto `.txt` + legenda `.srt`) e tratar voz. Liquid Glass, tema escuro, iOS 26+.
 
-## O que roda onde (versão 0.3)
+## O que roda onde (versão 0.4)
 
 | Função | No iPhone | Na nuvem |
 |---|---|---|
 | Baixar vídeo/áudio de link | — | ✅ (yt-dlp no servidor; o arquivo vem para o iPhone) |
 | Transcrever arquivo ou link | ✅ WhisperKit (large-v3-turbo, Neural Engine) | ✅ "Processar na nuvem" |
-| Tratar voz | (próxima versão) | ✅ modos fala / só voz / música |
+| Tratar voz (fala / só voz / música, eco, clareza, voz à frente, destino Quadra) | ✅ o mesmo motor da nuvem, portado para C; modelos baixados na 1ª vez de `cdn.frx9.com/modelos` | ✅ (Quadra: ainda não) |
 | Converter vídeo (presets do ConversorMidia + os seus, HDR, resolução 1080p/personalizada, qualidade/Mb/s/tamanho, velocidade com o som no mesmo tom, corte) | ✅ chip de vídeo (HEVC/H.264) | (AV1: futuro, pela nuvem) |
 | Extrair/converter áudio: M4A, WAV, MP3, OGG | ✅ (MP3 = LAME, OGG = Vorbis, compilados no app) | — |
 | Converter imagem | (próxima versão) | — |
 
 A "nuvem" é o whisper.frx9.com, com o mesmo usuário e senha do site — o app usa a mesma API,
 nada muda no servidor. A senha fica no Keychain do iPhone para renovar a sessão sozinho.
+
+## Tratar voz no iPhone
+
+- Código: `App/MotorVoz` (C). `mv_modelos.c` = separação (MDX Kim_Vocal_2) e eco (VR 5.1);
+  `mv_filtros.c` = os filtros do ffmpeg usados pelo motor (highpass, equalizer, acompressor,
+  alimiter, ebur128), com a mesma aritmética; `mv_pipeline.c` = o `tratar` do `pipeline.py`
+  (blocos com 10 s de contexto e emendas de 2 s, nivelamento a −16 LUFS, limitadores, mix, Quadra);
+  `mv_ort.c` = ONNX Runtime pela API C (um modelo aberto por vez, sem o "arena" de memória).
+- Conferido contra o motor Python (ffmpeg 6.1) no mesmo áudio: trilha e modo música ficam
+  idênticos até ~130–140 dB; nos modos com clareza, ~88 dB — é o piso de arredondamento dos
+  próprios filtros do ffmpeg (o ffmpeg dá a mesma diferença consigo mesmo quando a entrada muda
+  na 7ª casa). Os filtros isolados batem com o ffmpeg em 147 dB ou bit a bit.
+- Diferenças em relação à nuvem: blocos de 5 min (a nuvem usa 20 min; só muda onde ficam as
+  emendas em áudios longos) e MP3 a 44,1 kHz (a nuvem reamostra para 48 kHz).
+- Modelos (290 MB) em `Application Support/modelos-voz`, fora do backup. Ajustes → "Tratar voz
+  no iPhone" mostra, baixa e apaga. "Usar o Neural Engine" vem desligado (resultado igual ao da
+  nuvem); ligado pode acelerar, mas faz as contas com menos precisão.
+- No servidor: os dois `.onnx` ficam em `~/sites-frx9/cdn/modelos/` (permissão 644), servidos
+  em `https://cdn.frx9.com/modelos/`.
 
 ## Como gerar o IPA (sem Mac)
 

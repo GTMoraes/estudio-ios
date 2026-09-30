@@ -10,11 +10,14 @@ packages:
     # = tag v1.1.0. Fixado por commit: o pacote usa unsafeFlags e o SwiftPM
     # recusa isso em dependências resolvidas por versão.
     revision: 1e2a163736dfa5a198e637ae44c114e1c6d5cc2d
+  OnnxRuntime:
+    url: https://github.com/microsoft/onnxruntime-swift-package-manager
+    exactVersion: 1.24.2
 settings:
   base:
     SWIFT_VERSION: "5.0"
     TARGETED_DEVICE_FAMILY: "1"
-    MARKETING_VERSION: "0.3.0"
+    MARKETING_VERSION: "0.4.0"
     CURRENT_PROJECT_VERSION: "1"
     CODE_SIGNING_ALLOWED: "NO"
     CODE_SIGNING_REQUIRED: "NO"
@@ -32,6 +35,8 @@ targets:
       - target: Compartilhar
       - package: Argmax
         product: WhisperKit
+      - package: OnnxRuntime
+        product: onnxruntime
     entitlements:
       path: App/Estudio.entitlements
       properties:
@@ -72,9 +77,9 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gtm.estudio
         SWIFT_OBJC_BRIDGING_HEADER: App/Codificadores/Estudio-Bridging-Header.h
-        HEADER_SEARCH_PATHS: $(PROJECT_DIR)/vendor/include
+        HEADER_SEARCH_PATHS: "$(PROJECT_DIR)/vendor/include $(PROJECT_DIR)/App/MotorVoz"
         LIBRARY_SEARCH_PATHS: $(PROJECT_DIR)/vendor/lib
-        OTHER_LDFLAGS: "-lmp3lame -lvorbisenc -lvorbis -logg"
+        OTHER_LDFLAGS: "-lmp3lame -lvorbisenc -lvorbis -logg -lc++ -framework CoreML"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
     scheme: {}

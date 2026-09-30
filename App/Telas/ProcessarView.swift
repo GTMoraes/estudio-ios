@@ -147,6 +147,7 @@ struct PainelArquivo: View {
     @State private var naNuvem = UserDefaults.standard.bool(forKey: "nuvemPorPadrao")
     @State private var idioma = UserDefaults.standard.string(forKey: "idioma") ?? "pt"
     @State private var voz = OpcoesVoz.padrao(.fala)
+    @State private var quadra = false
 
     var body: some View {
         Cartao {
@@ -189,10 +190,24 @@ struct PainelArquivo: View {
                         Text("+6 dB").tag(6)
                     }
                 }
-                Label("Nesta versão o tratamento de voz roda na nuvem.", systemImage: "cloud.fill")
+                Picker("Onde vai tocar", selection: $quadra) {
+                    Text("Padrão").tag(false)
+                    Text("Quadra / ginásio").tag(true)
+                }
+                .disabled(naNuvem)
+                if quadra && !naNuvem {
+                    Text("Para som de PA em quadra: mono, sem graves abaixo de 110 Hz e clareza sem compressor.")
+                        .font(.footnote).foregroundStyle(Tema.texto2)
+                }
+                Toggle(isOn: $naNuvem) {
+                    Label("Processar na nuvem", systemImage: "cloud.fill")
+                }
+                Text(naNuvem ? "Envia para a sua nuvem e recebe os MP3 aqui (a opção Quadra ainda não existe na nuvem)."
+                             : ModelosVoz.prontos ? "Roda no iPhone, sem internet. Deixe o app aberto até terminar."
+                             : "Roda no iPhone. A 1ª vez baixa os modelos de voz (290 MB, uma vez só).")
                     .font(.footnote).foregroundStyle(Tema.texto2)
                 BotaoPrincipal(titulo: "Tratar voz", icone: "wand.and.stars") {
-                    estudio.tratarVoz(arquivo, nome: nome, opcoes: voz); fechar()
+                    estudio.tratarVoz(arquivo, nome: nome, opcoes: voz, quadra: quadra && !naNuvem, naNuvem: naNuvem); fechar()
                 }
             }
         }

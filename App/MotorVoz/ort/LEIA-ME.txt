@@ -1,0 +1,3 @@
+onnxruntime_c_api.h: cabeçalho da API C do ONNX Runtime 1.22 (licença MIT, Microsoft).
+A biblioteca vem do pacote Swift onnxruntime-swift-package-manager (1.24.2); a API C
+é compatível para trás, então pedir a versão 22 da API a uma biblioteca 1.24 funciona.
