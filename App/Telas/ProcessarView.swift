@@ -147,11 +147,11 @@ struct PainelArquivo: View {
     var fechar: () -> Void
 
     enum Acao: String, CaseIterable, Identifiable {
-        case transcrever = "Transcrever", voz = "Tratar voz", converter = "Converter"
+        case converter = "Converter", voz = "Tratar voz", transcrever = "Transcrever"
         var id: String { rawValue }
     }
 
-    @State private var acao: Acao = .transcrever
+    @State private var acao: Acao = .converter
     @State private var duracao: Double?
     @State private var naNuvem = UserDefaults.standard.bool(forKey: "nuvemPorPadrao")
     @State private var idioma = UserDefaults.standard.string(forKey: "idioma") ?? "pt"

@@ -14,6 +14,12 @@ struct EditorEnquadramento: View {
     @State private var quadro: UIImage?
     @State private var tempo: Double = 0
     @State private var inicio: Recorte?
+    // zoom só da prévia (o resultado não muda): ver detalhes para ajustar o recorte
+    @State private var zoom: CGFloat = 1
+    @State private var desloc: CGSize = .zero
+    @State private var zoomInicio: CGFloat?
+    @State private var deslocInicio: CGSize?
+    private let zoomMax: CGFloat = 8
 
     private let minimo = 0.05
     private var W: Double { Double(max(info.largura, 2)) }
@@ -52,7 +58,28 @@ struct EditorEnquadramento: View {
                         ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
+                .clipped()
+                // o recorte só recebe toques dentro da área: a imagem ampliada ou desfocada
+                // (scaledToFill) passava por cima dos botões e engolia os toques
+                .contentShape(Rectangle())
                 .padding(.horizontal)
+
+                if e.modo == .preencher || e.modo == .livre {
+                    HStack(spacing: 10) {
+                        Button { mudarZoom(zoom / 1.5) } label: { Image(systemName: "minus.magnifyingglass") }
+                            .buttonStyle(.glass).disabled(zoom <= 1.001)
+                        Text(String(format: "%.1f×", zoom).replacingOccurrences(of: ".", with: ","))
+                            .font(.footnote.monospacedDigit()).frame(width: 44)
+                        Button { mudarZoom(zoom * 1.5) } label: { Image(systemName: "plus.magnifyingglass") }
+                            .buttonStyle(.glass).disabled(zoom >= zoomMax - 0.001)
+                        Button("Ver a seleção") { focarSelecao() }.buttonStyle(.glass).font(.footnote)
+                        if zoom > 1.001 {
+                            Button("1×") { withAnimation(.snappy) { zoom = 1; desloc = .zero } }.buttonStyle(.glass).font(.footnote)
+                        }
+                    }
+                    Text("Pinça ou botões para dar zoom na prévia; arraste fora da moldura para mover. O resultado não muda.")
+                        .font(.caption).foregroundStyle(Tema.texto2).padding(.horizontal)
+                }
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
@@ -92,7 +119,7 @@ struct EditorEnquadramento: View {
     private func carregarQuadro() async {
         let g = AVAssetImageGenerator(asset: AVURLAsset(url: arquivo))
         g.appliesPreferredTrackTransform = true
-        g.maximumSize = CGSize(width: 1400, height: 1400)
+        g.maximumSize = .zero            // resolução cheia: o zoom da prévia mostra os pixels de verdade
         let tol = CMTime(seconds: 0.1, preferredTimescale: 600)
         g.requestedTimeToleranceBefore = tol
         g.requestedTimeToleranceAfter = tol
@@ -148,6 +175,8 @@ struct EditorEnquadramento: View {
         }
         .frame(width: tela.width, height: tela.height)
         .clipShape(.rect(cornerRadius: 6))
+        .contentShape(Rectangle())
+        .allowsHitTesting(false)
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(.white.opacity(0.5), lineWidth: 1))
         .position(x: tela.midX, y: tela.midY)
     }
@@ -156,14 +185,35 @@ struct EditorEnquadramento: View {
 
     @ViewBuilder
     private func areaRecorte(_ img: UIImage, _ area: CGSize) -> some View {
-        let q = encaixe(aspectoVideo, em: area)
+        let q0 = encaixe(aspectoVideo, em: area)
+        let q = retanguloZoom(q0)
         let r = e.recorte
         let caixa = CGRect(x: q.minX + CGFloat(r.x) * q.width, y: q.minY + CGFloat(r.y) * q.height,
                            width: CGFloat(r.largura) * q.width, height: CGFloat(r.altura) * q.height)
         ZStack(alignment: .topLeading) {
             Image(uiImage: img).resizable()
+                .interpolation(zoom > 2 ? .none : .high)       // no zoom forte, mostra os pixels de verdade
                 .frame(width: q.width, height: q.height)
                 .position(x: q.midX, y: q.midY)
+                .allowsHitTesting(false)
+            // fundo: pinça para zoom e arrastar para mover a prévia (fora da moldura)
+            Color.clear
+                .contentShape(Rectangle())
+                .frame(width: area.width, height: area.height)
+                .position(x: area.width / 2, y: area.height / 2)
+                .onAppear { areaAtual = area }
+                .onChange(of: area) { _, n in areaAtual = n }
+                .gesture(SimultaneousGesture(
+                    gestoZoom(q0),
+                    DragGesture(minimumDistance: 4)
+                        .onChanged { g in
+                            guard zoomInicio == nil else { return }
+                            if deslocInicio == nil { deslocInicio = desloc }
+                            let b = deslocInicio ?? .zero
+                            desloc = limitar(CGSize(width: b.width + g.translation.width, height: b.height + g.translation.height), q0, zoom)
+                        }
+                        .onEnded { _ in deslocInicio = nil }))
+                .onTapGesture(count: 2) { withAnimation(.snappy) { if zoom > 1.001 { zoom = 1; desloc = .zero } else { focarSelecao() } } }
             Path { p in p.addRect(q); p.addRect(caixa) }
                 .fill(Color.black.opacity(0.6), style: FillStyle(eoFill: true))
                 .allowsHitTesting(false)
@@ -171,8 +221,10 @@ struct EditorEnquadramento: View {
                 .frame(width: caixa.width, height: caixa.height)
                 .contentShape(Rectangle())
                 .position(x: caixa.midX, y: caixa.midY)
+                .simultaneousGesture(gestoZoom(q0))
                 .gesture(DragGesture()
                     .onChanged { g in
+                        guard zoomInicio == nil else { inicio = nil; return }
                         if inicio == nil { inicio = e.recorte }
                         guard let b = inicio else { return }
                         e.recorte.x = min(max(0, b.x + Double(g.translation.width / q.width)), 1 - b.largura)
@@ -195,6 +247,68 @@ struct EditorEnquadramento: View {
                         .onEnded { _ in inicio = nil })
             }
         }
+    }
+
+    // MARK: zoom da prévia
+
+    /// Retângulo da imagem na tela com o zoom e o deslocamento atuais.
+    private func retanguloZoom(_ q0: CGRect) -> CGRect {
+        let w = q0.width * zoom, h = q0.height * zoom
+        return CGRect(x: q0.midX - w / 2 + desloc.width, y: q0.midY - h / 2 + desloc.height, width: w, height: h)
+    }
+
+    /// Não deixa a imagem sair da área (sem faixas vazias ao mover).
+    private func limitar(_ d: CGSize, _ q0: CGRect, _ z: CGFloat) -> CGSize {
+        let mx = q0.width * (z - 1) / 2, my = q0.height * (z - 1) / 2
+        return CGSize(width: min(max(d.width, -mx), mx), height: min(max(d.height, -my), my))
+    }
+
+    /// Zoom mantendo parado o ponto sob os dedos.
+    private func aplicarZoom(_ novo: CGFloat, ancora: CGPoint, base q0: CGRect, zoomBase: CGFloat, deslocBase: CGSize) {
+        let z = min(max(1, novo), zoomMax)
+        let c = CGPoint(x: q0.midX + deslocBase.width, y: q0.midY + deslocBase.height)
+        let f = z / max(zoomBase, 0.01)
+        let c2 = CGPoint(x: ancora.x + (c.x - ancora.x) * f, y: ancora.y + (c.y - ancora.y) * f)
+        zoom = z
+        desloc = limitar(CGSize(width: c2.x - q0.midX, height: c2.y - q0.midY), q0, z)
+    }
+
+    /// Botões +/−: zoom pelo centro da prévia.
+    private func mudarZoom(_ novo: CGFloat) {
+        withAnimation(.snappy) {
+            let z = min(max(1, novo), zoomMax)
+            let f = z / zoom
+            zoom = z
+            desloc = CGSize(width: desloc.width * f, height: desloc.height * f)
+            ultimoQ0.map { desloc = limitar(desloc, $0, z) }
+        }
+    }
+
+    /// Enquadra a seleção na prévia (ocupando ~70% da área).
+    private func focarSelecao() {
+        guard let q0 = ultimoQ0 else { return }
+        let r = e.recorte
+        let z = min(zoomMax, max(1, 0.7 / max(CGFloat(r.largura), CGFloat(r.altura))))
+        // centro da seleção em coordenadas da imagem sem zoom (relativo ao centro)
+        let cx = (CGFloat(r.x + r.largura / 2) - 0.5) * q0.width
+        let cy = (CGFloat(r.y + r.altura / 2) - 0.5) * q0.height
+        withAnimation(.snappy) {
+            zoom = z
+            desloc = limitar(CGSize(width: -cx * z, height: -cy * z), q0, z)
+        }
+    }
+
+    @State private var areaAtual: CGSize = .zero
+    private var ultimoQ0: CGRect? { areaAtual == .zero ? nil : encaixe(aspectoVideo, em: areaAtual) }
+
+    private func gestoZoom(_ q0: CGRect) -> some Gesture {
+        MagnifyGesture()
+            .onChanged { g in
+                if zoomInicio == nil { zoomInicio = zoom; deslocInicio = desloc }
+                aplicarZoom((zoomInicio ?? 1) * g.magnification, ancora: g.startLocation, base: q0,
+                            zoomBase: zoomInicio ?? 1, deslocBase: deslocInicio ?? .zero)
+            }
+            .onEnded { _ in zoomInicio = nil; deslocInicio = nil }
     }
 
     private func redimensionar(_ b: Recorte, sx: Int, sy: Int, dx: Double, dy: Double) {
