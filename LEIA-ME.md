@@ -113,8 +113,27 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
 - O download vira um item "Google Drive" em Resultados: galeria de vídeos e imagens, outros arquivos,
   Converter, Salvar no Fotos, Compartilhar/Salvar em Arquivos. Segue fora da tela; "Continuar" pula os já baixados.
 - Docs/Planilhas/Apresentações do Google baixam como PDF.
+- 0.10.1: prévia com botão (i) em cima para ocultar a caixa de informações; botões empilhados.
+  Pastas/arquivos abertos por link ficam em Resultados ("Pasta do Drive", `Item.pastaDrive`); tocar abre
+  a pasta direto (lista atualizada na hora). Abrir o mesmo link de novo só sobe o item para o topo.
 - Precisa da chave de API do Google (Ajustes › Google Drive), guardada no Keychain. Só links públicos
   ("qualquer pessoa com o link"). Login na conta Google fica para a 0.11.
+
+## Conta Google (0.11)
+
+- `App/Motor/ContaGoogle.swift`: login OAuth com PKCE (cliente do tipo iOS, sem segredo), pela tela do
+  Google (`ASWebAuthenticationSession`, retorno `com.googleusercontent.apps.<id>:/oauth2redirect`).
+  Escopo `openid email drive.readonly`. ID do cliente, refresh token e e-mail no Keychain
+  (`com.gtm.estudio.google`); token de acesso só na memória, renovado sozinho.
+- Com login, `Drive.pedido` usa `Authorization: Bearer`; sem login, a chave de API. Logado e a conta não
+  enxerga um link público de outra pessoa: tenta com a chave e marca o item `publico` (downloads e
+  subpastas seguem pela chave).
+- Lugares da conta (pastas "de mentira"): `@meu` (Meu Drive), `@compartilhados` (sharedWithMe, mais
+  recentes primeiro), `@drives` (drives compartilhados). Cartão "Google Drive" em Novo quando logado.
+  Neles não há "Baixar tudo", só a seleção.
+- Miniaturas de arquivos privados: `ImagensDrive` pede o thumbnailLink com o token.
+- No Google Cloud: tela de consentimento "Externo", publicada "Em produção" (sem verificação; em "Teste" o
+  login expira a cada 7 dias).
 
 ## Nome de saída
 

@@ -5,9 +5,10 @@ import Photos
 
 struct ResultadosView: View {
     @Environment(Estudio.self) private var estudio
+    @State private var caminho = NavigationPath()
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $caminho) {
             Group {
                 if estudio.historico.itens.isEmpty {
                     ContentUnavailableView("Nada por aqui ainda", systemImage: "tray",
@@ -33,7 +34,17 @@ struct ResultadosView: View {
             }
             .telaEscura()
             .navigationTitle("Resultados")
-            .navigationDestination(for: UUID.self) { id in DetalheView(id: id) }
+            .navigationDestination(for: UUID.self) { id in
+                if let it = estudio.historico.item(id), it.tipo == .pastaDrive, let p = it.pastaDrive {
+                    // pasta do Drive guardada: abre direto; ao baixar, volta para a lista
+                    PastaDrive(pasta: p, fechar: { caminho = NavigationPath() }).telaEscura()
+                } else {
+                    DetalheView(id: id)
+                }
+            }
+            .navigationDestination(for: Drive.Item.self) { p in
+                PastaDrive(pasta: p, fechar: { caminho = NavigationPath() }).telaEscura()
+            }
         }
     }
 }
@@ -224,6 +235,7 @@ struct DetalheView: View {
         case .audio: return "Áudio"
         case .imagem: return "Imagens"
         case .drive: return "Google Drive"
+        case .pastaDrive: return "Pasta do Drive"
         }
     }
 }

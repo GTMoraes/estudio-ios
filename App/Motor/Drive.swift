@@ -2,7 +2,8 @@ import Foundation
 import Security
 
 /// Google Drive pela API oficial (v3), com a chave de API do Gabriel (guardada no Keychain).
-/// Etapa 1: links públicos ("qualquer pessoa com o link"). O download vem direto do Google.
+/// Sem login: links públicos ("qualquer pessoa com o link"). Com login (ContaGoogle): o que foi
+/// compartilhado com você, Meu Drive e drives compartilhados. O download vem direto do Google.
 enum Drive {
     static let base = URL(string: "https://www.googleapis.com/drive/v3/")!
 
@@ -49,6 +50,7 @@ enum Drive {
         var duracaoMs: Int64?
         var chaveRecurso: String?
         var miniaturaLink: String?       // thumbnailLink da API (lh3…=s220)
+        var publico: Bool?               // logado, mas só abriu como link público: pede com a chave
 
         var ehPasta: Bool { mime == "application/vnd.google-apps.folder" }
         var ehVideo: Bool { mime.hasPrefix("video/") }
@@ -119,18 +121,28 @@ enum Drive {
 
     private static let campos = "id,name,mimeType,size,modifiedTime,resourceKey,lastModifyingUser(displayName),thumbnailLink,imageMediaMetadata(width,height),videoMediaMetadata(width,height,durationMillis),shortcutDetails(targetId,targetMimeType,targetResourceKey)"
 
-    private static func pedido(_ caminho: String, _ params: [String: String], chaves: [String: String?] = [:]) throws -> URLRequest {
-        guard let chave else { throw ErroApp("Falta a chave do Google Drive (Ajustes › Google Drive).") }
+    /// Com login: Authorization Bearer (vê o que foi compartilhado com você). Sem login: chave de API (só público).
+    private static func pedido(_ caminho: String, _ params: [String: String], chaves: [String: String?] = [:],
+                               semLogin: Bool = false) async throws -> URLRequest {
+        var token: String?
+        if !semLogin { token = try await ContaGoogle.shared.tokenAcesso() }
+        if token == nil && chave == nil {
+            throw ErroApp("Entre com a conta Google ou cadastre a chave de API (Ajustes › Google Drive).")
+        }
         var c = URLComponents(url: base.appendingPathComponent(caminho), resolvingAgainstBaseURL: false)!
-        c.queryItems = params.map { URLQueryItem(name: $0.key, value: $0.value) } + [
-            URLQueryItem(name: "key", value: chave),
-            URLQueryItem(name: "supportsAllDrives", value: "true"),
-        ]
+        var q = params.map { URLQueryItem(name: $0.key, value: $0.value) }
+        q.append(URLQueryItem(name: "supportsAllDrives", value: "true"))
+        if token == nil, let chave { q.append(URLQueryItem(name: "key", value: chave)) }
+        c.queryItems = q
         var r = URLRequest(url: c.url!)
+        if let token { r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         let rks = chaves.compactMap { id, rk in rk.map { "\(id)/\($0)" } }
         if !rks.isEmpty { r.setValue(rks.joined(separator: ","), forHTTPHeaderField: "X-Goog-Drive-Resource-Keys") }
         return r
     }
+
+    /// Há como falar com o Drive (login ou chave)?
+    static var configurado: Bool { ContaGoogle.logado || chave != nil }
 
     private static func json(_ r: URLRequest) async throws -> [String: Any] {
         let (d, resp) = try await URLSession.shared.data(for: r)
@@ -138,8 +150,12 @@ enum Drive {
         let obj = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] ?? [:]
         guard (200..<300).contains(codigo) else {
             let msg = ((obj["error"] as? [String: Any])?["message"] as? String) ?? "HTTP \(codigo)"
+            if codigo == 401 { await ContaGoogle.shared.invalidar() }
             switch codigo {
-            case 404: throw ErroApp("Não encontrei no Drive (o link não é público ou foi apagado).")
+            case 404 where ContaGoogle.logado:
+                throw ErroApp("Não encontrei no Drive (não foi compartilhado com \(ContaGoogle.email ?? "a sua conta") ou foi apagado).")
+            case 404: throw ErroApp("Não encontrei no Drive (o link não é público ou foi apagado). Entrando com a conta Google dá para abrir o que foi compartilhado com você.")
+            case 401: throw ErroApp("O Google recusou o login. Tente de novo; se repetir, saia e entre de novo em Ajustes.")
             case 403 where msg.lowercased().contains("key"): throw ErroApp("A chave do Google Drive foi recusada: \(msg)")
             case 403: throw ErroApp("O Drive recusou o acesso: \(msg)")
             default: throw ErroApp("Drive: \(msg)")
@@ -179,34 +195,107 @@ enum Drive {
     /// Pede uma pasta pública conhecida do próprio Google: 404 = a chave passou; 400/403 = chave ruim.
     static func testarChave() async throws {
         do {
-            _ = try await json(try pedido("files/0B_invalido_teste", ["fields": "id"]))
+            guard let chave else { throw ErroApp("Sem chave.") }
+            var c = URLComponents(url: base.appendingPathComponent("files/0B_invalido_teste"), resolvingAgainstBaseURL: false)!
+            c.queryItems = [URLQueryItem(name: "fields", value: "id"), URLQueryItem(name: "key", value: chave)]
+            _ = try await json(URLRequest(url: c.url!))
         } catch let e as ErroApp where e.localizedDescription.hasPrefix("Não encontrei") {
             return
         }
     }
 
     static func abrir(_ l: Link) async throws -> Item {
-        let r = try pedido("files/\(l.id)", ["fields": campos], chaves: [l.id: l.chaveRecurso])
-        var i = item(try await json(r))
+        if let r = raizEspecial(l.id) { return r }
+        let o: [String: Any]
+        do {
+            o = try await json(try await pedido("files/\(l.id)", ["fields": campos], chaves: [l.id: l.chaveRecurso]))
+        } catch where ContaGoogle.logado && chave != nil {
+            // logado mas a conta não enxerga: tenta como link público
+            var p = item(try await json(try await pedido("files/\(l.id)", ["fields": campos], chaves: [l.id: l.chaveRecurso], semLogin: true)))
+            p.publico = true
+            if p.chaveRecurso == nil { p.chaveRecurso = l.chaveRecurso }
+            return p
+        }
+        var i = item(o)
         if i.chaveRecurso == nil { i.chaveRecurso = l.chaveRecurso }
         return i
     }
 
-    /// Conteúdo de uma pasta: pastas primeiro, depois por nome.
-    static func listar(_ pasta: Item) async throws -> [Item] {
+    // MARK: lugares da conta (com login)
+
+    static let meuDrive = "@meu"
+    static let compartilhados = "@compartilhados"
+    static let drivesCompartilhados = "@drives"
+    private static let pastaMime = "application/vnd.google-apps.folder"
+
+    /// "Meu Drive", "Compartilhados comigo", "Drives compartilhados": pastas de mentira para o navegador.
+    static func raizEspecial(_ id: String) -> Item? {
+        switch id {
+        case meuDrive: return Item(id: id, nome: "Meu Drive", mime: pastaMime)
+        case compartilhados: return Item(id: id, nome: "Compartilhados comigo", mime: pastaMime)
+        case drivesCompartilhados: return Item(id: id, nome: "Drives compartilhados", mime: pastaMime)
+        default: return nil
+        }
+    }
+
+    /// Conteúdo de uma pasta: pastas primeiro, depois por nome. "Compartilhados comigo": mais recentes primeiro.
+    static func listar(_ pasta: Item, limite: Int = 5000) async throws -> [Item] {
+        if pasta.id == drivesCompartilhados { return try await listarDrives() }
+        if pasta.publico == true { return try await listar(pasta, limite: limite, semLogin: true) }
+        guard ContaGoogle.logado, chave != nil, !pasta.id.hasPrefix("@") else {
+            return try await listar(pasta, limite: limite, semLogin: false)
+        }
+        // logado: se a conta não enxergar a pasta (link público de outra pessoa), lista como público
+        do {
+            let r = try await listar(pasta, limite: limite, semLogin: false)
+            if !r.isEmpty { return r }
+        } catch {}
+        return try await listar(pasta, limite: limite, semLogin: true)
+    }
+
+    private static func listar(_ pasta: Item, limite: Int, semLogin: Bool) async throws -> [Item] {
         var todos: [Item] = []
         var pagina: String?
         repeat {
-            var p = ["q": "'\(pasta.id)' in parents and trashed = false",
-                     "fields": "nextPageToken,files(\(campos))",
-                     "pageSize": "1000", "orderBy": "folder,name_natural",
+            var p = ["fields": "nextPageToken,files(\(campos))", "pageSize": "1000",
                      "includeItemsFromAllDrives": "true"]
+            switch pasta.id {
+            case compartilhados:
+                p["q"] = "sharedWithMe = true and trashed = false"
+                p["orderBy"] = "sharedWithMeTime desc"
+            case meuDrive:
+                p["q"] = "'root' in parents and trashed = false"
+                p["orderBy"] = "folder,name_natural"
+            default:
+                p["q"] = "'\(pasta.id)' in parents and trashed = false"
+                p["orderBy"] = "folder,name_natural"
+                if ContaGoogle.logado && !semLogin { p["corpora"] = "allDrives" }   // inclui drives compartilhados
+            }
             if let pagina { p["pageToken"] = pagina }
-            let o = try await json(try pedido("files", p, chaves: [pasta.id: pasta.chaveRecurso]))
-            todos += ((o["files"] as? [[String: Any]]) ?? []).map(item)
+            let o = try await json(try await pedido("files", p, chaves: [pasta.id: pasta.chaveRecurso], semLogin: semLogin))
+            todos += ((o["files"] as? [[String: Any]]) ?? []).map { d in
+                var i = item(d)
+                if semLogin && ContaGoogle.logado { i.publico = true }
+                return i
+            }
+            pagina = o["nextPageToken"] as? String
+        } while pagina != nil && todos.count < limite
+        return todos
+    }
+
+    private static func listarDrives() async throws -> [Item] {
+        var todos: [Item] = []
+        var pagina: String?
+        repeat {
+            var p = ["pageSize": "100", "fields": "nextPageToken,drives(id,name)"]
+            if let pagina { p["pageToken"] = pagina }
+            let o = try await json(try await pedido("drives", p))
+            todos += ((o["drives"] as? [[String: Any]]) ?? []).map {
+                Item(id: $0["id"] as? String ?? "", nome: $0["name"] as? String ?? "Drive", mime: pastaMime)
+            }
             pagina = o["nextPageToken"] as? String
         } while pagina != nil
-        return todos
+        return todos.sorted { $0.nome.localizedStandardCompare($1.nome) == .orderedAscending }
     }
 
     /// Todos os arquivos da pasta e das subpastas (até `limite`), com o caminho relativo.
@@ -223,18 +312,19 @@ enum Drive {
     }
 
     /// Endereço do conteúdo (para baixar ou tocar o vídeo sem baixar).
-    static func conteudo(_ i: Item) throws -> URLRequest {
+    static func conteudo(_ i: Item) async throws -> URLRequest {
         if i.ehDocGoogle {
-            return try pedido("files/\(i.id)/export", ["mimeType": "application/pdf"], chaves: [i.id: i.chaveRecurso])
+            return try await pedido("files/\(i.id)/export", ["mimeType": "application/pdf"], chaves: [i.id: i.chaveRecurso],
+                                    semLogin: i.publico == true)
         }
-        return try pedido("files/\(i.id)", ["alt": "media"], chaves: [i.id: i.chaveRecurso])
+        return try await pedido("files/\(i.id)", ["alt": "media"], chaves: [i.id: i.chaveRecurso], semLogin: i.publico == true)
     }
 }
 
 extension Drive {
     /// Baixa um arquivo para `destino`, avisando os bytes recebidos. Cancelável.
     static func baixar(_ i: Item, para destino: URL, progresso: @escaping @Sendable (Int64) -> Void) async throws {
-        let r = try conteudo(i)
+        let r = try await conteudo(i)
         final class Caixa: @unchecked Sendable {
             var obs: NSKeyValueObservation?
             var tarefa: URLSessionDownloadTask?

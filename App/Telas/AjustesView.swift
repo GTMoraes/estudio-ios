@@ -24,6 +24,7 @@ struct AjustesView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     contaNuvem
+                    CartaoContaGoogle()
                     CartaoDrive()
                     Cartao(titulo: "Padrões", icone: "slider.horizontal.3") {
                         Toggle(isOn: $nuvemPorPadrao) { Label("Processar na nuvem", systemImage: "cloud.fill") }
@@ -278,7 +279,7 @@ struct CartaoDrive: View {
     @State private var testando = false
 
     var body: some View {
-        Cartao(titulo: "Google Drive", icone: "externaldrive.fill.badge.icloud") {
+        Cartao(titulo: "Drive: chave de API", icone: "key.fill") {
             if temChave {
                 Label("Chave de API guardada no iPhone", systemImage: "checkmark.seal.fill").foregroundStyle(.green)
                 Text("Links públicos do Drive (\u{201C}qualquer pessoa com o link\u{201D}) abrem no app, com as pastas.")
@@ -323,6 +324,76 @@ struct CartaoDrive: View {
             do { try await Drive.testarChave(); msg = "A chave funciona." }
             catch { msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription }
             testando = false
+        }
+    }
+}
+
+
+/// Login na conta Google: abre o que foi compartilhado com você, Meu Drive e drives compartilhados.
+struct CartaoContaGoogle: View {
+    @State private var logado = ContaGoogle.logado
+    @State private var email = ContaGoogle.email
+    @State private var cliente = ContaGoogle.clienteId ?? ""
+    @State private var editandoCliente = ContaGoogle.clienteId == nil
+    @State private var entrando = false
+    @State private var msg: String?
+
+    var body: some View {
+        Cartao(titulo: "Conta Google (Drive)", icone: "person.crop.circle.badge.checkmark") {
+            if logado {
+                Label("Conectado como \(email ?? "sua conta")", systemImage: "checkmark.seal.fill").foregroundStyle(.green)
+                Text("Abre links compartilhados com você, Meu Drive e drives compartilhados (só leitura).")
+                    .font(.footnote).foregroundStyle(Tema.texto2)
+                Button("Sair da conta Google", role: .destructive) {
+                    Task { await ContaGoogle.sair(); logado = false; email = nil }
+                }
+                .buttonStyle(.glass)
+            } else {
+                Text("Para ver o que foi compartilhado só com você. A senha é digitada na tela do Google, nunca no app.")
+                    .font(.footnote).foregroundStyle(Tema.texto2)
+                if editandoCliente {
+                    TextField("ID do cliente (…apps.googleusercontent.com)", text: $cliente)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .font(.footnote.monospaced())
+                        .padding(12).background(.white.opacity(0.06), in: .rect(cornerRadius: 14))
+                    Button("Colar", systemImage: "doc.on.clipboard") {
+                        if let s = UIPasteboard.general.string { cliente = s.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    }
+                    .buttonStyle(.glass)
+                } else {
+                    HStack {
+                        Label("ID do cliente salvo", systemImage: "checkmark.circle").font(.footnote).foregroundStyle(Tema.texto2)
+                        Spacer()
+                        Button("Trocar") { editandoCliente = true }.buttonStyle(.glass)
+                    }
+                }
+                BotaoPrincipal(titulo: entrando ? "Abrindo o Google…" : "Entrar com o Google", icone: "person.badge.key.fill",
+                               desativado: entrando || cliente.trimmingCharacters(in: .whitespaces).isEmpty) {
+                    entrar()
+                }
+            }
+            if let msg { Text(msg).font(.footnote).foregroundStyle(.yellow) }
+        }
+    }
+
+    private func entrar() {
+        let c = cliente.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard ContaGoogle.esquema(c) != nil else {
+            msg = "O ID do cliente deve terminar em .apps.googleusercontent.com (cliente do tipo iOS)."
+            return
+        }
+        ContaGoogle.salvarCliente(c)
+        editandoCliente = false
+        entrando = true; msg = nil
+        Task {
+            do {
+                try await ContaGoogle.entrar()
+                logado = ContaGoogle.logado
+                email = ContaGoogle.email
+            } catch {
+                msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            }
+            entrando = false
         }
     }
 }

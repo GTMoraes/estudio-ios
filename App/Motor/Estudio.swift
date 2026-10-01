@@ -689,6 +689,18 @@ final class Estudio {
 
     // --- Google Drive: baixar (direto do Google para o iPhone)
 
+    /// Pasta (ou arquivo) do Drive aberta pelo link: fica em Resultados para abrir de novo.
+    /// Se já estava lá, sobe para o topo.
+    func lembrarDrive(_ d: Drive.Item) {
+        let velhos = historico.itens.filter { $0.tipo == .pastaDrive && $0.pastaDrive?.id == d.id }.map(\.id)
+        velhos.forEach { historico.remover($0) }
+        var n = Item(tipo: .pastaDrive, titulo: d.nome, naNuvem: false)
+        n.estado = .pronto
+        n.pastaDrive = d
+        n.resumo = d.ehPasta ? "Pasta do Google Drive · toque para abrir" : "Arquivo do Google Drive · toque para abrir"
+        historico.adicionar(n)
+    }
+
     func baixarDrive(_ itens: [Drive.Item], titulo: String, converterDepois: Bool = false) {
         let arquivos = itens.filter { !$0.ehPasta }
         guard !arquivos.isEmpty else { return }
@@ -917,7 +929,7 @@ final class Estudio {
                     switch tipo {
                     case .transcricao: try await self.guardarTranscricaoDaNuvem(id, r, base: base, inicio: inicio)
                     case .voz: try await self.guardarVozDaNuvem(id, r, inicio: inicio, base: personalizado ? base : nil)
-                    case .imagem, .drive: break   // imagens e Drive nunca vão para a nuvem
+                    case .imagem, .drive, .pastaDrive: break   // imagens e Drive nunca vão para a nuvem
                     case .video, .audio:
                         guard let tid = r["id"] as? Int, let item = self.historico.item(id) else { throw ErroApp("Resposta incompleta da nuvem.") }
                         let modo = tipo == .video ? "video" : "audio"

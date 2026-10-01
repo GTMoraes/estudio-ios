@@ -3,7 +3,7 @@ import Observation
 
 /// Um resultado guardado neste iPhone (Documentos/Resultados/<id>/).
 struct Item: Codable, Identifiable, Equatable {
-    enum Tipo: String, Codable { case transcricao, voz, video, audio, imagem, drive }
+    enum Tipo: String, Codable { case transcricao, voz, video, audio, imagem, drive, pastaDrive }
     enum Estado: String, Codable { case processando, pronto, erro }
 
     var id = UUID()
@@ -25,6 +25,7 @@ struct Item: Codable, Identifiable, Equatable {
     var origensMidia: [String: OrigemMidia]?   // lote de vídeos: arquivo convertido -> original
     var retomada: Retomada?                // trabalho no iPhone: o que é preciso para continuar
     var pedidoLink: PedidoLink?            // link: o pedido original, para "Tentar de novo"
+    var pastaDrive: Drive.Item?            // pasta (ou arquivo) do Drive aberta antes: acesso rápido
 
     var pasta: URL { Historico.pastaResultados.appendingPathComponent(id.uuidString, isDirectory: true) }
     func url(_ nome: String) -> URL { pasta.appendingPathComponent(nome) }
@@ -37,6 +38,7 @@ struct Item: Codable, Identifiable, Equatable {
         case .audio: return "music.note"
         case .imagem: return "photo"
         case .drive: return "icloud.and.arrow.down"
+        case .pastaDrive: return "folder.fill"
         }
     }
 }

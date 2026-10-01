@@ -10,7 +10,7 @@ struct NavegadorDrive: View {
 
     @State private var raiz: Drive.Item?
     @State private var erro: String?
-    @State private var semChave = Drive.chave == nil
+    @State private var semChave = !Drive.configurado
     @State private var tentativa = 0
 
     var body: some View {
@@ -20,13 +20,14 @@ struct NavegadorDrive: View {
                     ScrollView {
                         VStack(spacing: 16) {
                             Cartao {
-                                Label("Falta a chave do Google Drive", systemImage: "key.fill").font(.headline)
-                                Text("É preciso uma vez só. Depois de salvar, toque em “Abrir o link”.")
+                                Label("Falta configurar o Google Drive", systemImage: "key.fill").font(.headline)
+                                Text("Entre com a conta Google ou salve a chave de API. É uma vez só; depois toque em “Abrir”.")
                                     .font(.footnote).foregroundStyle(Tema.texto2)
                             }
+                            CartaoContaGoogle()
                             CartaoDrive()
-                            BotaoPrincipal(titulo: "Abrir o link", icone: "arrow.right.circle.fill") {
-                                semChave = Drive.chave == nil
+                            BotaoPrincipal(titulo: "Abrir", icone: "arrow.right.circle.fill") {
+                                semChave = !Drive.configurado
                                 if !semChave { tentativa += 1 }
                             }
                         }
@@ -59,9 +60,13 @@ struct NavegadorDrive: View {
 
     private func abrir() async {
         guard !semChave, raiz == nil else { return }
+        if let r = Drive.raizEspecial(link) { raiz = r; return }       // Meu Drive, Compartilhados comigo…
         guard let l = Drive.analisar(link) else { erro = "Esse link do Drive não foi reconhecido."; return }
-        do { raiz = try await Drive.abrir(l) }
-        catch { self.erro = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription }
+        do {
+            let r = try await Drive.abrir(l)
+            raiz = r
+            estudio.lembrarDrive(r)
+        } catch { self.erro = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription }
     }
 }
 
@@ -95,6 +100,7 @@ struct PastaDrive: View {
         case .fotos: return a.filter(\.ehImagem)
         }
     }
+    private var especial: Bool { pasta.id.hasPrefix("@") }
     private var temMidia: Bool { (itens ?? []).contains(where: \.ehMidia) }
     private var escolhidos: [Drive.Item] { (itens ?? []).filter { selecionados.contains($0.id) && !$0.ehPasta } }
 
@@ -102,8 +108,9 @@ struct PastaDrive: View {
         Group {
             if let itens {
                 if itens.isEmpty {
-                    ContentUnavailableView("Pasta vazia", systemImage: "folder",
-                                           description: Text("Ou o que tem nela não está compartilhado com “qualquer pessoa com o link”."))
+                    ContentUnavailableView(especial ? "Nada aqui" : "Pasta vazia", systemImage: "folder",
+                                           description: Text(especial ? "Nada compartilhado nesta parte da sua conta."
+                                                             : "Ou o que tem nela não está compartilhado com você."))
                 } else {
                     conteudo
                 }
@@ -131,7 +138,8 @@ struct PastaDrive: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            if let itens, !itens.isEmpty { barraInferior }
+            // nos lugares da conta (Meu Drive…) não há "Baixar tudo": só a seleção
+            if let itens, !itens.isEmpty, !especial || selecionando { barraInferior }
         }
         .task { await carregar() }
         .fullScreenCover(item: $previa) { p in
@@ -259,10 +267,10 @@ struct PastaDrive: View {
                 Label("Lista", systemImage: "list.bullet").tag(true)
             }
             Divider()
-            if !pastas.isEmpty {
+            if !pastas.isEmpty && !especial {
                 Button("Baixar tudo, com as subpastas", systemImage: "square.and.arrow.down.on.square") { baixarComSubpastas() }
             }
-            if pasta.ehPasta {
+            if pasta.ehPasta && !especial {
                 Button("Copiar link da pasta", systemImage: "link") { UIPasteboard.general.string = pasta.linkWeb }
             }
         } label: {
@@ -416,25 +424,46 @@ struct ImagemDrive<Falha: View>: View {
     let reserva: URL?
     var preencher: Bool
     @ViewBuilder var falha: Falha
-    @State private var usarReserva = false
+    @State private var imagem: UIImage?
+    @State private var falhou = false
 
     var body: some View {
-        let u = usarReserva ? reserva : (principal ?? reserva)
-        AsyncImage(url: u) { fase in
-            switch fase {
-            case .success(let img):
-                if preencher { img.resizable().scaledToFill() } else { img.resizable().scaledToFit() }
-            case .failure:
-                if !usarReserva, principal != nil, reserva != nil, principal != reserva {
-                    ProgressView().onAppear { usarReserva = true }
-                } else {
-                    falha
-                }
-            default:
+        Group {
+            if let imagem {
+                if preencher { Image(uiImage: imagem).resizable().scaledToFill() }
+                else { Image(uiImage: imagem).resizable().scaledToFit() }
+            } else if falhou {
+                falha
+            } else {
                 ProgressView()
             }
         }
-        .id(usarReserva)
+        .task(id: principal) {
+            if let i = await ImagensDrive.carregar(principal, reserva) { imagem = i } else { falhou = true }
+        }
+    }
+}
+
+/// Miniaturas do Drive: thumbnailLink (com o login, se houver) e, se não abrir, o endereço público.
+enum ImagensDrive {
+    private static let cache = NSCache<NSURL, UIImage>()
+
+    static func carregar(_ principal: URL?, _ reserva: URL?) async -> UIImage? {
+        for (u, comLogin) in [(principal, true), (reserva, false)] {
+            guard let u else { continue }
+            if let i = cache.object(forKey: u as NSURL) { return i }
+            var r = URLRequest(url: u)
+            if comLogin, let t = try? await ContaGoogle.shared.tokenAcesso() {
+                r.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization")
+            }
+            guard let resposta = try? await URLSession.shared.data(for: r),
+                  (resposta.1 as? HTTPURLResponse)?.statusCode == 200 else { continue }
+            let d = resposta.0
+            guard let i = await Task.detached(operation: { UIImage(data: d)?.preparingForDisplay() }).value else { continue }
+            cache.setObject(i, forKey: u as NSURL)
+            return i
+        }
+        return nil
     }
 }
 
@@ -477,7 +506,6 @@ struct PreviaDrive: View {
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
                 .ignoresSafeArea()
-                .onTapGesture { withAnimation(.snappy) { mostrarInfo.toggle() } }
             }
         }
         .overlay(alignment: .top) {
@@ -491,11 +519,18 @@ struct PreviaDrive: View {
                         .glassEffect(.regular, in: .capsule)
                 }
                 Spacer()
-                if itens.indices.contains(atual) {
-                    ShareLink(item: URL(string: itens[atual].linkWeb)!) {
-                        Image(systemName: "link").font(.headline).padding(10)
+                HStack(spacing: 8) {
+                    // (i): mostra/oculta a caixa de informações (embaixo ficam os controles do vídeo)
+                    Button { withAnimation(.snappy) { mostrarInfo.toggle() } } label: {
+                        Image(systemName: mostrarInfo ? "info.circle.fill" : "info.circle").font(.headline).padding(10)
                     }
                     .buttonStyle(.glass)
+                    if itens.indices.contains(atual) {
+                        ShareLink(item: URL(string: itens[atual].linkWeb)!) {
+                            Image(systemName: "link").font(.headline).padding(10)
+                        }
+                        .buttonStyle(.glass)
+                    }
                 }
             }
             .padding(.horizontal)
@@ -520,7 +555,8 @@ struct PreviaDrive: View {
                 if i.ehDocGoogle { Label("Documento do Google: baixa como PDF", systemImage: "doc.richtext") }
             }
             .font(.caption).foregroundStyle(Tema.texto2)
-            HStack(spacing: 10) {
+            // um embaixo do outro: lado a lado o "Baixar e converter" era cortado
+            VStack(spacing: 8) {
                 Button { baixar(i, false); fechar() } label: {
                     Label("Baixar", systemImage: "arrow.down.circle.fill")
                         .font(.body.weight(.semibold)).frame(maxWidth: .infinity).padding(.vertical, 4)
@@ -529,7 +565,7 @@ struct PreviaDrive: View {
                 if i.ehMidia {
                     Button { baixar(i, true); fechar() } label: {
                         Label("Baixar e converter", systemImage: "arrow.triangle.2.circlepath")
-                            .frame(maxWidth: .infinity).padding(.vertical, 4)
+                            .lineLimit(1).frame(maxWidth: .infinity).padding(.vertical, 4)
                     }
                     .buttonStyle(.glass)
                 }
@@ -547,6 +583,7 @@ struct PaginaDrive: View {
     let ativa: Bool
     @State private var player: AVPlayer?
     @State private var erroVideo: String?
+    @State private var preparando = false
 
     var body: some View {
         Group {
@@ -585,7 +622,17 @@ struct PaginaDrive: View {
 
     private func prepararVideo() {
         guard item.ehVideo, player == nil, erroVideo == nil else { player?.play(); return }
-        guard let r = try? Drive.conteudo(item), let u = r.url else { erroVideo = "Não deu para tocar este vídeo."; return }
+        guard !preparando else { return }
+        preparando = true
+        Task {
+            defer { preparando = false }
+            guard let r = try? await Drive.conteudo(item), let u = r.url else { erroVideo = "Não deu para tocar este vídeo."; return }
+            tocar(r, u)
+        }
+    }
+
+    private func tocar(_ r: URLRequest, _ u: URL) {
+        guard ativa else { return }
         var opcoes: [String: Any] = [:]
         if let h = r.allHTTPHeaderFields, !h.isEmpty { opcoes["AVURLAssetHTTPHeaderFieldsKey"] = h }
         let p = AVPlayer(playerItem: AVPlayerItem(asset: AVURLAsset(url: u, options: opcoes)))

@@ -11,6 +11,7 @@ struct NovoView: View {
     @State private var escolhendoImagens = false
     @State private var fotosGaleria: [PhotosPickerItem] = []
     @State private var carregandoFotos = false
+    @State private var logadoGoogle = ContaGoogle.logado
 
     var body: some View {
         NavigationStack {
@@ -37,6 +38,18 @@ struct NovoView: View {
                                        desativado: link.trimmingCharacters(in: .whitespaces).isEmpty, acao: abrirLink)
                         Text("Links do Google Drive abrem aqui mesmo, para navegar e escolher o que baixar. Os outros são baixados pela nuvem; o arquivo pronto vem para o iPhone.")
                             .font(.footnote).foregroundStyle(Tema.texto2)
+                    }
+
+                    if logadoGoogle {
+                        Cartao(titulo: "Google Drive", icone: "externaldrive.fill.badge.icloud") {
+                            VStack(spacing: 10) {
+                                botaoDrive("Compartilhados comigo", "person.2.fill", Drive.compartilhados)
+                                HStack(spacing: 10) {
+                                    botaoDrive("Meu Drive", "externaldrive.fill", Drive.meuDrive)
+                                    botaoDrive("Drives compartilhados", "building.2.fill", Drive.drivesCompartilhados)
+                                }
+                            }
+                        }
                     }
 
                     Cartao(titulo: "Áudio ou vídeo", icone: "waveform.badge.plus") {
@@ -92,6 +105,7 @@ struct NovoView: View {
             }
             .telaEscura()
             .navigationTitle("Estúdio")
+            .onAppear { logadoGoogle = ContaGoogle.logado }
             // um .fileImporter só: dois na mesma tela brigam e só o último funciona
             .fileImporter(isPresented: Binding(get: { escolhendoArquivo || escolhendoImagens },
                                                set: { if !$0 { escolhendoArquivo = false; escolhendoImagens = false } }),
@@ -139,6 +153,15 @@ struct NovoView: View {
                 }
             }
         }
+    }
+
+    private func botaoDrive(_ titulo: String, _ icone: String, _ lugar: String) -> some View {
+        Button { estudio.receber(.drive(lugar)) } label: {
+            Label(titulo, systemImage: icone)
+                .font(.subheadline).lineLimit(1).minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity).padding(.vertical, 6)
+        }
+        .buttonStyle(.glass)
     }
 
     private func abrirLink() {
