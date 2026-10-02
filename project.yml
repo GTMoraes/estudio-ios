@@ -17,7 +17,7 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     TARGETED_DEVICE_FAMILY: "1"
-    MARKETING_VERSION: "0.11.0"
+    MARKETING_VERSION: "0.12.0"
     CURRENT_PROJECT_VERSION: "1"
     CODE_SIGNING_ALLOWED: "NO"
     CODE_SIGNING_REQUIRED: "NO"
@@ -63,6 +63,7 @@ targets:
           - com.gtm.estudio.trabalho.*
         LSSupportsOpeningDocumentsInPlace: true
         NSPhotoLibraryAddUsageDescription: Para salvar no Fotos os vídeos e as imagens que você converter ou baixar.
+        NSPhotoLibraryUsageDescription: Para buscar de novo o vídeo original na galeria quando você toca em "Editar novamente", sem o app guardar uma cópia.
         CFBundleURLTypes:
           - CFBundleURLName: com.gtm.estudio
             CFBundleURLSchemes:

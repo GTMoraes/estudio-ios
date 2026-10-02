@@ -42,6 +42,7 @@ struct ResultadosView: View {
                     DetalheView(id: id)
                 }
             }
+            .onChange(of: estudio.trabalhosCriados) { caminho = NavigationPath() }
             .navigationDestination(for: Drive.Item.self) { p in
                 PastaDrive(pasta: p, fechar: { caminho = NavigationPath() }).telaEscura()
             }
@@ -97,6 +98,8 @@ struct DetalheView: View {
     let id: UUID
     @State private var texto: String?
     @State private var aviso: String?
+    @State private var editorAberto = false
+    @State private var buscandoOriginal = false
 
     var body: some View {
         if let item = estudio.historico.item(id) {
@@ -140,6 +143,33 @@ struct DetalheView: View {
 
                     if item.estado == .pronto, item.tipo == .drive {
                         PainelResultadoDrive(item: item, aviso: $aviso, salvarNoFotos: salvarTodasNoFotos)
+                    }
+                    if item.estado == .pronto, item.tipo == .legenda {
+                        Cartao {
+                            BotaoPrincipal(titulo: "Abrir o editor de legenda", icone: "captions.bubble.fill") { editorAberto = true }
+                            Text("Blocos, texto, estilo e posição; depois grave a legenda no vídeo.")
+                                .font(.caption).foregroundStyle(Tema.texto2)
+                        }
+                    }
+                    if item.estado == .pronto, let r = item.reedicao, r.tipo != .legenda {
+                        Cartao {
+                            Button {
+                                buscandoOriginal = true
+                                Task {
+                                    if let motivo = await estudio.editarNovamente(id) { aviso = motivo }
+                                    buscandoOriginal = false
+                                }
+                            } label: {
+                                Label(buscandoOriginal ? "Buscando o original…" : "Editar novamente", systemImage: "slider.horizontal.3")
+                                    .frame(maxWidth: .infinity).padding(.vertical, 4)
+                            }
+                            .buttonStyle(.glass)
+                            .disabled(buscandoOriginal)
+                            Text((r.procedencias ?? []).contains(where: { $0 != nil })
+                                 ? "Busca o original de novo (na galeria, no app Arquivos ou em Resultados) e abre o conversor com os mesmos ajustes. Este resultado continua aqui."
+                                 : "Abre o conversor com a cópia do original guardada no app e os mesmos ajustes. Este resultado continua aqui.")
+                                .font(.caption).foregroundStyle(Tema.texto2)
+                        }
                     }
                     if item.estado == .pronto, item.tipo == .imagem || item.tipo == .video {
                         Cartao {
@@ -195,6 +225,7 @@ struct DetalheView: View {
             .alert("Aviso", isPresented: Binding(get: { aviso != nil }, set: { if !$0 { aviso = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: { Text(aviso ?? "") }
+            .fullScreenCover(isPresented: $editorAberto) { EditorLegenda(id: id) }
         } else {
             ContentUnavailableView("Item apagado", systemImage: "trash").telaEscura()
         }
@@ -236,6 +267,7 @@ struct DetalheView: View {
         case .imagem: return "Imagens"
         case .drive: return "Google Drive"
         case .pastaDrive: return "Pasta do Drive"
+        case .legenda: return "Legenda"
         }
     }
 }

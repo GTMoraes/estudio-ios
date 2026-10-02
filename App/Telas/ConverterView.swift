@@ -336,7 +336,9 @@ struct PainelConverter: View {
                 Text(info.fps > 0 ? String(format: "Original (%.0f)", info.fps) : "Original").tag(0)
                 ForEach([60, 30, 25, 24].filter { Double($0) < info.fps - 0.5 || $0 == o.fps }, id: \.self) { Text("\($0)").tag($0) }
             }
-            Text("A saída sempre tem taxa de quadros constante (resolve o fps variável do iPhone).")
+            Text(info.fpsVariavel
+                 ? String(format: "Este vídeo tem fps variável (pico %.0f, média %.0f). A saída sai constante em %.0f.", info.fps, info.fpsMedio, PlanoConversao.fpsSaida(info, o))
+                 : "A saída sempre tem taxa de quadros constante (resolve o fps variável do iPhone).")
                 .font(.caption).foregroundStyle(Tema.texto2)
 
             taxa(info)

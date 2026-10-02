@@ -37,6 +37,7 @@ struct AjustesView: View {
                         .pickerStyle(.segmented)
                     }
                     CartaoPreparar()
+                    CartaoOriginais()
                     modeloLocalCartao
                     vozCartao
                     Cartao(titulo: "Sobre", icone: "info.circle") {
@@ -395,5 +396,47 @@ struct CartaoContaGoogle: View {
             }
             entrando = false
         }
+    }
+}
+
+
+/// Cópias guardadas dos vídeos que chegaram pelo Compartilhar (os outros são buscados de novo
+/// na galeria, no app Arquivos ou em Resultados).
+struct CartaoOriginais: View {
+    @Environment(Estudio.self) private var estudio
+    @AppStorage("originaisDias") private var dias = 7
+    @State private var espaco: Int64 = 0
+
+    var body: some View {
+        Cartao(titulo: "Editar novamente", icone: "slider.horizontal.3") {
+            Text("Para editar de novo, o app busca o original na galeria, no app Arquivos ou em Resultados. Só o que chega pelo Compartilhar precisa de uma cópia guardada, porque o iPhone não entrega o original.")
+                .font(.footnote).foregroundStyle(Tema.texto2)
+            Picker("Manter essas cópias por", selection: $dias) {
+                Text("7 dias").tag(7)
+                Text("30 dias").tag(30)
+                Text("Indefinido").tag(-1)
+            }
+            HStack {
+                Text("Em uso: \(ByteCountFormatter.string(fromByteCount: espaco, countStyle: .file))").font(.subheadline)
+                Spacer()
+                Menu {
+                    Button("Manter os últimos 7 dias") { apagar(7) }
+                    Button("Manter os últimos 30 dias") { apagar(30) }
+                    Button("Apagar tudo", role: .destructive) { apagar(nil) }
+                } label: {
+                    Label("Apagar", systemImage: "trash").padding(.horizontal, 12).padding(.vertical, 7)
+                        .background(.white.opacity(0.08), in: .capsule)
+                }
+            }
+            Text("Conta também o vídeo que o editor de legenda deixa à mão. Apagar tira só os vídeos: o texto e o estilo das legendas ficam, e o vídeo volta sozinho quando há de onde buscar.")
+                .font(.caption).foregroundStyle(Tema.texto2)
+        }
+        .onAppear { estudio.limparOriginaisAntigos(); espaco = Originais.tamanhoEmDisco() }
+        .onChange(of: dias) { estudio.limparOriginaisAntigos(); espaco = Originais.tamanhoEmDisco() }
+    }
+
+    private func apagar(_ manter: Int?) {
+        estudio.limparOriginais(manterDias: manter)
+        espaco = Originais.tamanhoEmDisco()
     }
 }

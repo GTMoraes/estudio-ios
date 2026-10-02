@@ -3,7 +3,7 @@
 App de iPhone que junta o whisper.frx9.com e o ConversorMidia: baixar links (YouTube, Instagram…),
 transcrever (texto `.txt` + legenda `.srt`) e tratar voz. Liquid Glass, tema escuro, iOS 26+.
 
-## O que roda onde (versão 0.9)
+## O que roda onde (versão 0.11)
 
 | Função | No iPhone | Na nuvem |
 |---|---|---|
@@ -13,6 +13,7 @@ transcrever (texto `.txt` + legenda `.srt`) e tratar voz. Liquid Glass, tema esc
 | Converter vídeo (presets do ConversorMidia + os seus, HDR, resolução 1080p/personalizada, qualidade/Mb/s/tamanho, velocidade com o som no mesmo tom, corte) | ✅ chip de vídeo (HEVC/H.264) | (AV1: futuro, pela nuvem) |
 | Extrair/converter áudio: M4A, WAV, MP3, OGG | ✅ (MP3 = LAME, OGG = Vorbis, compilados no app) | — |
 | Converter imagem (WebP, JPG, HEIC, PNG, AVIF se o iOS tiver; tamanho, recorte, metadados, alvo em KB, nomes) | ✅ ImageIO + libwebp 1.5.0 (compilada no app) | — |
+| Google Drive: navegar, prévia, baixar (links públicos e, com login, o que foi compartilhado com você) | ✅ direto do Google para o iPhone | — |
 
 A "nuvem" é o whisper.frx9.com, com o mesmo usuário e senha do site — o app usa a mesma API,
 nada muda no servidor. A senha fica no Keychain do iPhone para renovar a sessão sozinho.
@@ -116,8 +117,8 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
 - 0.10.1: prévia com botão (i) em cima para ocultar a caixa de informações; botões empilhados.
   Pastas/arquivos abertos por link ficam em Resultados ("Pasta do Drive", `Item.pastaDrive`); tocar abre
   a pasta direto (lista atualizada na hora). Abrir o mesmo link de novo só sobe o item para o topo.
-- Precisa da chave de API do Google (Ajustes › Google Drive), guardada no Keychain. Só links públicos
-  ("qualquer pessoa com o link"). Login na conta Google fica para a 0.11.
+- Sem login, usa a chave de API do Google (Ajustes › Drive: chave de API), guardada no Keychain: só links
+  públicos ("qualquer pessoa com o link"). Com login (0.11, abaixo), abre também o que foi compartilhado com você.
 
 ## Conta Google (0.11)
 
@@ -133,7 +134,42 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
   Neles não há "Baixar tudo", só a seleção.
 - Miniaturas de arquivos privados: `ImagensDrive` pede o thumbnailLink com o token.
 - No Google Cloud: tela de consentimento "Externo", publicada "Em produção" (sem verificação; em "Teste" o
-  login expira a cada 7 dias).
+  login expira a cada 7 dias). Publicar exige página inicial e política de privacidade: estão em `site-google/`
+  e no ar em https://estudio.frx9.com/ (GT-SRV `~/sites-frx9/sites/estudio/`). Não apagar.
+
+## Legendas e "Editar novamente" (0.12)
+
+- **Legendar** (Novo › arquivo de vídeo › Legendar): transcreve no iPhone com o tempo de cada palavra e cria um item
+  "Legenda" em Resultados (.srt + .txt). O vídeo e o projeto ficam em `Application Support/Originais/<id>/`
+  (`legenda.json`), enquanto o item existir. "Abrir o editor de legenda" no item.
+- Modelo (`App/Motor/LegendaProjeto.swift`): lista única de palavras com tempo; os blocos são marcas nas palavras
+  (`fimDeBloco`), então reagrupar (por frase / N palavras), dividir, juntar e corrigir texto não perdem tempos.
+- Desenho (`App/Motor/LegendaDesenho.swift`): `DesenhoLegenda.desenhar` é a MESMA função na prévia do editor e no
+  vídeo final (medidas em fração do vídeo). Contorno com cantos redondos, sombra, caixa de fundo num caminho só
+  (linhas encostadas não escurecem em dobro), destaque da palavra falada, espaçamento entre linhas, letras e palavras.
+- Editor (`App/Telas/LegendaView.swift`): abas Blocos, Estilo, Posição; estilos prontos (Clássica, Viral, Caixa,
+  Amarela); exportar = uma conversão comum com `OpcoesConversao.legenda` (o Core Image põe a legenda sobre cada
+  quadro; `PintorLegenda` guarda as últimas imagens). Com legenda, o enquadramento passa pelo Core Image (Lanczos ao reduzir).
+- **Editar novamente**: toda conversão pronta (um vídeo ou lote) guarda os ajustes em `Item.reedicao` e DE ONDE veio
+  cada arquivo (`Procedencia`, em `Retomada.procedencias`): galeria (identificador do vídeo; pede leitura do Fotos na
+  hora), app Arquivos (marcador/bookmark) ou um arquivo de Resultados (ex.: baixado do Drive). O botão busca o original
+  de novo (`Estudio.garantirOriginais`) e abre o conversor com os mesmos ajustes (`Estudio.ajustesGuardados`).
+  Só o que chega pelo Compartilhar (ou "Abrir com") não tem referência: aí fica uma cópia em
+  `Application Support/Originais/<id>/`, pelo prazo de Ajustes › Editar novamente (7 dias, 30 dias ou indefinido;
+  botão Apagar: manter 7 dias / 30 dias / tudo). Original apagado ou movido: o botão explica em vez de falhar.
+  A legenda deixa o vídeo à mão na mesma pasta (o editor usa) e o busca de novo se ele sair de lá.
+- Fora desta versão: importar fontes .ttf/.otf, salvar estilos próprios, ajustar o tempo palavra por palavra, animações.
+
+## Correções (0.11.1)
+
+- 0.11.1: **vídeo saía a 20 fps em vez de 30.** Causa: a composição usava uma grade fixa (instantes n/30) e vídeos
+  com tempo em microssegundos (CapCut/ffmpeg: quadros em 0,033333 · 0,066667 · 0,100000 s) têm 1 quadro a cada 3
+  um fio depois do instante da grade; ele nunca era mostrado. Agora a composição entrega todos os quadros da fonte
+  (`sourceTrackIDForFrameTiming`, com grade de reserva de 2× o fps da fonte) e o `Bombeador.Grade` põe cada um no
+  instante de saída (fps constante de verdade: descarta o que sobra, repete o que falta). Conferido por simulação
+  com os tempos reais de `Video VRR Original/` (1980 quadros → 1980, antes 1320).
+- 0.11.1: em vídeo de fps variável, `InfoMidia.fps` é a taxa de pico (`fpsReal`) e `fpsMedio` a média.
+- 0.11.1: todo trabalho novo faz a aba Resultados voltar para a lista (`Estudio.trabalhosCriados`).
 
 ## Nome de saída
 
@@ -179,7 +215,8 @@ novo na nuvem e baixar o modelo de transcrição outra vez (~630 MB).
 ## Estrutura
 
 - `project.yml` — projeto (XcodeGen); o `.xcodeproj` é gerado no GitHub Actions.
-- `App/` — app: `Motor/` (nuvem, transcrição local, legenda, histórico), `Telas/` (SwiftUI).
+- `App/` — app: `Motor/` (nuvem, transcrição local, voz, conversores, Drive, conta Google, histórico), `Telas/` (SwiftUI).
+- `site-google/` — página inicial e política de privacidade exigidas pelo Google (publicadas em estudio.frx9.com).
 - `Compartilhar/` — extensão de compartilhar: guarda o link/arquivo numa caixa do grupo de apps e abre o app.
 - `Compartilhado/` — caixa de entrada usada pelos dois.
 - `.github/workflows/build-ipa.yml` — compila e gera o IPA com assinatura provisória (a AltStore reassina).

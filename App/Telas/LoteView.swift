@@ -109,6 +109,17 @@ struct PainelLoteVideos: View {
     // MARK: ajustes
 
     private func carregar() async {
+        // "Editar novamente" de um lote: volta com os ajustes de cada vídeo
+        let guardados = arquivos.compactMap { u in estudio.ajustesGuardados[u.path].map { (u, $0) } }
+        if lote == nil, let primeiro = estudio.ajustesGuardados[referencia.path] {
+            var o = primeiro.opcoes
+            o.inicio = nil; o.fim = nil
+            lote = AjusteConversao(opcoes: o, selecao: primeiro.selecao)
+            versaoLote += 1
+        }
+        defer {
+            for par in guardados where infos[par.0] != nil && par.1.opcoes != doLote(par.0) { proprios[par.0] = par.1 }
+        }
         for u in arquivos where infos[u] == nil && erros[u] == nil {
             do {
                 infos[u] = try await InfoMidia.ler(u)

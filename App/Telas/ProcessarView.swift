@@ -160,7 +160,7 @@ struct PainelArquivo: View {
     var fechar: () -> Void
 
     enum Acao: String, CaseIterable, Identifiable {
-        case converter = "Converter", voz = "Tratar voz", transcrever = "Transcrever"
+        case converter = "Converter", voz = "Tratar voz", transcrever = "Transcrever", legendar = "Legendar"
         var id: String { rawValue }
     }
 
@@ -173,6 +173,8 @@ struct PainelArquivo: View {
     @State private var padraoTrans = PadraoNome.ler(.transcricao)
     @State private var padraoVoz = PadraoNome.ler(.voz)
     @State private var dataOriginal = Date()
+    @State private var temVideo = false
+    @State private var presetLegenda = PresetLegenda.todos[0].id
 
     private let notaData = "{data} e {datahora} = quando o áudio/vídeo foi gravado (se o arquivo não disser, a data do arquivo)."
 
@@ -192,16 +194,35 @@ struct PainelArquivo: View {
         .task {
             duracao = await AudioUtil.duracao(arquivo)
             dataOriginal = await DataMidia.ler(arquivo)
+            temVideo = ((try? await InfoMidia.ler(arquivo))?.temVideo) ?? false
         }
 
         Picker("O que fazer", selection: $acao) {
-            ForEach(Acao.allCases) { Text($0.rawValue).tag($0) }
+            ForEach(Acao.allCases.filter { $0 != .legendar || temVideo }) { Text($0.rawValue).tag($0) }
         }
         .pickerStyle(.segmented)
 
         switch acao {
         case .converter:
-            PainelConverter(arquivo: arquivo, nome: nome, fechar: fechar)
+            // "Editar novamente": abre com os ajustes que foram usados
+            PainelConverter(arquivo: arquivo, nome: nome, fechar: fechar, inicial: estudio.ajustesGuardados[arquivo.path])
+        case .legendar:
+            Cartao(titulo: "Legendar o vídeo", icone: "captions.bubble") {
+                Text("Transcreve no iPhone guardando o tempo de cada palavra. Quando terminar, abra o item em Resultados para entrar no editor (blocos, texto, estilo, posição) e gravar a legenda no vídeo.")
+                    .font(.footnote).foregroundStyle(Tema.texto2)
+                Picker("Idioma", selection: $idioma) {
+                    Text("Português").tag("pt")
+                    Text("Detectar").tag("auto")
+                }
+                .pickerStyle(.segmented)
+                Picker("Começar com o estilo", selection: $presetLegenda) {
+                    ForEach(PresetLegenda.todos) { p in Text(p.nome).tag(p.id) }
+                }
+                Text("Dá para trocar tudo no editor, sem transcrever de novo.").font(.caption).foregroundStyle(Tema.texto2)
+            }
+            BotaoPrincipal(titulo: "Transcrever para legendar", icone: "captions.bubble.fill") {
+                estudio.legendar(arquivo, nome: nome, idioma: idioma, preset: presetLegenda, data: dataOriginal); fechar()
+            }
         case .transcrever:
             Cartao(titulo: "Transcrever", icone: "text.quote") {
                 OpcoesTranscricao(naNuvem: $naNuvem, idioma: $idioma)

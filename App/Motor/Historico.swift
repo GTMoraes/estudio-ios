@@ -3,7 +3,7 @@ import Observation
 
 /// Um resultado guardado neste iPhone (Documentos/Resultados/<id>/).
 struct Item: Codable, Identifiable, Equatable {
-    enum Tipo: String, Codable { case transcricao, voz, video, audio, imagem, drive, pastaDrive }
+    enum Tipo: String, Codable { case transcricao, voz, video, audio, imagem, drive, pastaDrive, legenda }
     enum Estado: String, Codable { case processando, pronto, erro }
 
     var id = UUID()
@@ -26,6 +26,7 @@ struct Item: Codable, Identifiable, Equatable {
     var retomada: Retomada?                // trabalho no iPhone: o que é preciso para continuar
     var pedidoLink: PedidoLink?            // link: o pedido original, para "Tentar de novo"
     var pastaDrive: Drive.Item?            // pasta (ou arquivo) do Drive aberta antes: acesso rápido
+    var reedicao: Retomada?                // conversão pronta: os ajustes usados; o original fica em Originais/<id>
 
     var pasta: URL { Historico.pastaResultados.appendingPathComponent(id.uuidString, isDirectory: true) }
     func url(_ nome: String) -> URL { pasta.appendingPathComponent(nome) }
@@ -39,6 +40,7 @@ struct Item: Codable, Identifiable, Equatable {
         case .imagem: return "photo"
         case .drive: return "icloud.and.arrow.down"
         case .pastaDrive: return "folder.fill"
+        case .legenda: return "captions.bubble"
         }
     }
 }
@@ -56,7 +58,7 @@ struct OrigemImagem: Codable, Equatable {
 /// Tudo o que um trabalho no iPhone precisa para ser continuado depois que o app foi fechado.
 /// A entrada fica em Trabalhos/<id>/entrada (ver SegundoPlano.swift).
 struct Retomada: Codable, Equatable {
-    enum Tipo: String, Codable { case voz, conversao, imagens, transcricao, loteConversao, drive }
+    enum Tipo: String, Codable { case voz, conversao, imagens, transcricao, loteConversao, drive, legenda }
     var tipo: Tipo
     var entradas: [String]            // nomes dentro de Trabalhos/<id>/entrada
     var nome: String                  // nome do arquivo original
@@ -75,6 +77,7 @@ struct Retomada: Codable, Equatable {
     var datas: [Date]?
     var drive: [Drive.Item]?              // download do Drive: os arquivos pedidos
     var converterDepois: Bool?
+    var procedencias: [Procedencia?]?     // de onde veio cada entrada (para buscar o original de novo)
 }
 
 /// Um pedido feito a partir de um link (baixar ou transcrever), guardado para repetir.
@@ -145,6 +148,7 @@ final class Historico {
         guard let i = item(id) else { return }
         try? FileManager.default.removeItem(at: i.pasta)
         Trabalhos.apagar(id)
+        Originais.apagar(id)
         itens.removeAll { $0.id == id }
         salvar()
     }

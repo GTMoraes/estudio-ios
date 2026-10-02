@@ -42,6 +42,8 @@ final class Estudio {
     private var fila: [Entrada] = []
     private var tarefas: [UUID: Task<Void, Never>] = [:]
     var abaSelecionada = 0
+    /// Sobe a cada trabalho novo: a aba Resultados volta para a lista (sai do detalhe aberto).
+    var trabalhosCriados = 0
     var logado = Credenciais.ler() != nil
 
     static var pastaRecebidos: URL {
@@ -127,6 +129,7 @@ final class Estudio {
         let destino = Nuvem.semColisao(Self.pastaRecebidos.appendingPathComponent(n))
         do {
             try FileManager.default.copyItem(at: url, to: destino)
+            procedencias[destino.path] = procedencia(de: url, comAcesso: acesso)
             receber(.arquivo(destino, nome: n))
         } catch {
             aviso = "Não consegui abrir o arquivo: \(error.localizedDescription)"
@@ -135,7 +138,8 @@ final class Estudio {
 
     /// Vários arquivos de uma vez (Arquivos ou Galeria): as imagens viram um lote só.
     /// nomes: nome original de cada arquivo (a galeria entrega com nome temporário).
-    func importarVarios(_ urls: [URL], nomes: [String]? = nil) {
+    /// origens: de onde veio cada arquivo, quando quem chama sabe (galeria); senão é deduzido (Arquivos, Resultados).
+    func importarVarios(_ urls: [URL], nomes: [String]? = nil, origens: [Procedencia?]? = nil) {
         var imagens: [URL] = []
         var midias: [(URL, String)] = []
         for (k, u) in urls.enumerated() {
@@ -145,6 +149,8 @@ final class Estudio {
             let destino = Nuvem.semColisao(Self.pastaRecebidos.appendingPathComponent(nome))
             do {
                 try FileManager.default.copyItem(at: u, to: destino)
+                let dada: Procedencia? = origens.flatMap { k < $0.count ? $0[k] : nil }
+                procedencias[destino.path] = dada ?? procedencia(de: u, comAcesso: acesso)
                 if ehImagem(destino) { imagens.append(destino) } else { midias.append((destino, nome)) }
             } catch {
                 aviso = "Não consegui abrir \(nome): \(error.localizedDescription)"
@@ -155,6 +161,22 @@ final class Estudio {
     }
 
     var aviso: String?
+
+    /// De onde veio cada arquivo recebido (pelo caminho em Recebidos): é o que permite ao
+    /// "Editar novamente" buscar o original de volta sem o app guardar uma cópia.
+    var procedencias: [String: Procedencia] = [:]
+
+    private func procedencia(de url: URL, comAcesso: Bool) -> Procedencia? {
+        // arquivo de um item de Resultados (ex.: baixado do Drive): Resultados/<id>/<nome>
+        let partes = url.standardizedFileURL.pathComponents
+        let raiz = Historico.pastaResultados.standardizedFileURL.pathComponents
+        if partes.count == raiz.count + 2, Array(partes.prefix(raiz.count)) == raiz, let id = UUID(uuidString: partes[raiz.count]) {
+            return Procedencia(tipo: .resultado, item: id, nome: partes[raiz.count + 1])
+        }
+        // escolhido no app Arquivos: um marcador que abre o mesmo arquivo depois
+        if comAcesso, let m = try? url.bookmarkData() { return Procedencia(tipo: .arquivo, marcador: m, nome: url.lastPathComponent) }
+        return nil
+    }
 
     // MARK: - trabalhos
 
@@ -169,6 +191,7 @@ final class Estudio {
         i.baseSaida = base
         historico.adicionar(i)
         abaSelecionada = 1
+        trabalhosCriados += 1          // Resultados volta para a lista
         return i.id
     }
 
@@ -178,6 +201,7 @@ final class Estudio {
     }
 
     private func concluir(_ id: UUID, arquivos: [String], resumo: String? = nil, inicio: Date, duracao: Double? = nil) {
+        guardarOriginais(id)
         historico.atualizar(id) {
             $0.estado = .pronto; $0.mensagem = nil; $0.progresso = nil
             $0.arquivos = arquivos; $0.resumo = resumo; $0.trabalho = nil
@@ -187,6 +211,99 @@ final class Estudio {
         }
         Trabalhos.apagar(id)
         atualizarTela()
+    }
+
+    /// Conversão (e legenda) pronta: guarda os ajustes usados para "Editar novamente". O original só
+    /// fica guardado (em Originais/<id>) quando não há como buscá-lo de volta (veio pelo Compartilhar);
+    /// os da galeria, do app Arquivos e de Resultados são buscados de novo na hora.
+    private func guardarOriginais(_ id: UUID) {
+        guard let r = historico.item(id)?.retomada,
+              r.tipo == .conversao || r.tipo == .loteConversao || r.tipo == .legenda else { return }
+        let destino = Originais.pasta(id)
+        for (k, n) in r.entradas.enumerated() {
+            let temOrigem = (r.procedencias.flatMap { k < $0.count ? $0[k] : nil }) != nil
+            if temOrigem && r.tipo != .legenda { continue }        // a legenda fica com o vídeo à mão (o editor usa)
+            try? FileManager.default.createDirectory(at: destino, withIntermediateDirectories: true)
+            try? FileManager.default.moveItem(at: entrada(id, n), to: destino.appendingPathComponent(n))
+        }
+        historico.atualizar(id, salvarAgora: false) { $0.reedicao = r }
+        limparOriginaisAntigos()
+    }
+
+    /// Limpeza automática, pelo prazo escolhido em Ajustes (indefinido = não apaga).
+    func limparOriginaisAntigos() {
+        if Originais.dias > 0 { limparOriginais(manterDias: Originais.dias) }
+    }
+
+    /// Apaga os vídeos guardados (nil = todos; N = mantém os dos últimos N dias). O projeto da
+    /// legenda (texto e estilo) nunca é apagado aqui, só o vídeo.
+    func limparOriginais(manterDias: Int?) {
+        let limite = manterDias.map { Date().addingTimeInterval(-Double($0) * 86400) }
+        let fm = FileManager.default
+        for pasta in (try? fm.contentsOfDirectory(at: Originais.raiz, includingPropertiesForKeys: nil)) ?? [] {
+            guard let id = UUID(uuidString: pasta.lastPathComponent), let item = historico.item(id) else {
+                try? fm.removeItem(at: pasta); continue                 // sobra de um item já apagado
+            }
+            if let limite, item.criado >= limite { continue }
+            for f in (try? fm.contentsOfDirectory(at: pasta, includingPropertiesForKeys: nil)) ?? []
+            where f.lastPathComponent != Originais.nomeProjeto {
+                try? fm.removeItem(at: f)
+            }
+        }
+    }
+
+    /// Os originais de um item, na pasta Originais/<id>: os que não estão lá são buscados de volta
+    /// (galeria, Arquivos, Resultados). Erro com explicação quando não dá.
+    func garantirOriginais(_ id: UUID) async throws -> [URL] {
+        guard let r = historico.item(id)?.reedicao, !r.entradas.isEmpty else {
+            throw ErroApp("Este resultado não guardou os ajustes da conversão.")
+        }
+        var urls: [URL] = []
+        for (k, n) in r.entradas.enumerated() {
+            let alvo = Originais.arquivo(id, n)
+            if !FileManager.default.fileExists(atPath: alvo.path) {
+                guard let origem = r.procedencias.flatMap({ k < $0.count ? $0[k] : nil }) else {
+                    throw ErroApp("A cópia do original (\(r.nomes.flatMap { k < $0.count ? $0[k] : nil } ?? r.nome)) já foi apagada do app. Escolha o arquivo de novo em Novo.")
+                }
+                try FileManager.default.createDirectory(at: Originais.pasta(id), withIntermediateDirectories: true)
+                let resultado: URL? = origem.tipo == .resultado
+                    ? origem.item.flatMap { historico.item($0) }.flatMap { i in origem.nome.map { i.url($0) } } : nil
+                try await origem.trazer(para: alvo, arquivoDoResultado: resultado)
+            }
+            urls.append(alvo)
+        }
+        return urls
+    }
+
+    /// Ajustes guardados de uma conversão, entregues ao conversor quando o arquivo abre de novo.
+    var ajustesGuardados: [String: AjusteConversao] = [:]
+
+    /// "Editar novamente": abre o conversor com o original e os ajustes que foram usados.
+    /// Devolve o motivo quando não dá (original apagado ou movido).
+    func editarNovamente(_ id: UUID) async -> String? {
+        let originais: [URL]
+        do { originais = try await garantirOriginais(id) }
+        catch { return (error as? LocalizedError)?.errorDescription ?? error.localizedDescription }
+        guard let r = historico.item(id)?.reedicao else { return "Este resultado foi apagado." }
+        // o conversor fica com o arquivo que recebe: trabalha numa cópia
+        var copias: [URL] = []
+        for (k, u) in originais.enumerated() {
+            let nome = r.tipo == .loteConversao ? (r.nomes.flatMap { k < $0.count ? $0[k] : nil } ?? u.lastPathComponent) : r.nome
+            let c = Nuvem.semColisao(Self.pastaRecebidos.appendingPathComponent(nome))
+            let origem = r.procedencias.flatMap { k < $0.count ? $0[k] : nil }
+            do {
+                // buscado só para esta edição: vai direto para o conversor, sem deixar cópia guardada
+                if origem != nil && r.tipo != .legenda { try FileManager.default.moveItem(at: u, to: c) }
+                else { try FileManager.default.copyItem(at: u, to: c) }
+            } catch { return "Não consegui abrir o original: \(error.localizedDescription)" }
+            procedencias[c.path] = origem
+            let o = r.tipo == .loteConversao ? r.conversoes.flatMap { k < $0.count ? $0[k] : nil } : r.conversao
+            if let o { ajustesGuardados[c.path] = AjusteConversao(opcoes: o, selecao: "p:" + PresetConversao.personalizado.rawValue) }
+            copias.append(c)
+        }
+        if copias.count == 1 { receber(.arquivo(copias[0], nome: copias[0].lastPathComponent)) }
+        else { receber(.videos(copias)) }
+        return nil
     }
 
     private func falhar(_ id: UUID, _ erro: Error) {
@@ -349,6 +466,7 @@ final class Estudio {
         case .transcricao: executarTranscricao(id)
         case .loteConversao: executarLote(id)
         case .drive: executarDrive(id)
+        case .legenda: executarLegenda(id)
         }
     }
 
@@ -426,6 +544,89 @@ final class Estudio {
             ) { msg, p in Task { @MainActor in self.etapa(id, msg, p) } }
             let dur = await AudioUtil.duracao(arquivo)
             try self.guardarTranscricao(id, segs, base: base, inicio: inicio, duracao: dur)
+        }
+    }
+
+    // --- legenda (editor): transcreve guardando o tempo de cada palavra; o vídeo fica guardado
+
+    func legendar(_ arquivo: URL, nome: String, idioma: String, preset: String, data: Date = Date()) {
+        let id = novoItem(.legenda, nome, nuvem: false, mensagem: "Preparando", base: Self.base(nome))
+        var r = Retomada(tipo: .legenda, entradas: [], nome: nome, base: Self.base(nome), data: data, idioma: idioma)
+        r.falhas = [preset]                      // estilo pronto escolhido na entrada
+        r.procedencias = [procedencias[arquivo.path]]
+        if prepararTrabalho(id, [arquivo], r) { executarLegenda(id) }
+    }
+
+    private func executarLegenda(_ id: UUID) {
+        guard let r = historico.item(id)?.retomada, let nomeEntrada = r.entradas.first else { return }
+        let arquivo = entrada(id, nomeEntrada)
+        let base = r.base ?? Self.base(r.nome)
+        let idioma = r.idioma ?? "pt"
+        let inicio = Date()
+        rodar(id, recomecar: true) {
+            try await self.aguardarVez(id)
+            let segs = try await TranscritorLocal.shared.transcrever(
+                arquivo, modelo: self.modeloLocal, idioma: idioma == "auto" ? nil : idioma
+            ) { msg, p in Task { @MainActor in self.etapa(id, msg, p) } }
+            var projeto = ProjetoLegenda.criar(segs)
+            if projeto.palavras.isEmpty { throw ErroApp("Não encontrei fala nesse vídeo.") }
+            if let p = PresetLegenda.todos.first(where: { $0.id == r.falhas?.first }) { projeto.aplicar(p) }
+            Originais.gravarProjeto(id, projeto)
+            let dur = await AudioUtil.duracao(arquivo)
+            guard let item = self.historico.item(id) else { return }
+            try FileManager.default.createDirectory(at: item.pasta, withIntermediateDirectories: true)
+            let nomes = try self.gravarArquivosDaLegenda(item, projeto, base: base)
+            self.concluir(id, arquivos: nomes, resumo: String(projeto.textoCorrido.prefix(400)), inicio: inicio, duracao: dur)
+        }
+    }
+
+    private func gravarArquivosDaLegenda(_ item: Item, _ p: ProjetoLegenda, base: String) throws -> [String] {
+        let nomes = ["\(base).srt", "\(base).txt"]
+        try p.srt.write(to: item.url(nomes[0]), atomically: true, encoding: .utf8)
+        try p.textoCorrido.write(to: item.url(nomes[1]), atomically: true, encoding: .utf8)
+        return nomes
+    }
+
+    /// Vídeo de um item de legenda (buscado de volta se a cópia local já saiu).
+    func videoDaLegenda(_ id: UUID) async throws -> URL {
+        guard let u = try await garantirOriginais(id).first else { throw ErroApp("O vídeo desta legenda não foi encontrado.") }
+        return u
+    }
+
+    /// Editor fechado ou exportando: guarda o projeto e refaz o .srt/.txt com as correções.
+    func salvarLegenda(_ id: UUID, _ p: ProjetoLegenda) {
+        Originais.gravarProjeto(id, p)
+        guard let item = historico.item(id), item.estado == .pronto else { return }
+        let base = item.baseSaida ?? Self.base(item.titulo)
+        if let nomes = try? gravarArquivosDaLegenda(item, p, base: base) {
+            let outros = item.arquivos.filter { !nomes.contains($0) }
+            historico.atualizar(id) { $0.arquivos = nomes + outros; $0.resumo = String(p.textoCorrido.prefix(400)) }
+        }
+    }
+
+    /// Grava a legenda no vídeo: é uma conversão comum (vira um item de vídeo em Resultados).
+    func exportarLegenda(_ id: UUID, _ p: ProjetoLegenda, opcoes: OpcoesConversao) async -> String? {
+        salvarLegenda(id, p)
+        guard let item = historico.item(id) else { return "Este item foi apagado." }
+        let original: URL
+        do { original = try await videoDaLegenda(id) }
+        catch { return (error as? LocalizedError)?.errorDescription ?? error.localizedDescription }
+        let nome = item.reedicao?.nome ?? item.titulo
+        let copia = Nuvem.semColisao(Self.pastaRecebidos.appendingPathComponent(nome))
+        do {
+            try FileManager.default.copyItem(at: original, to: copia)
+            procedencias[copia.path] = item.reedicao?.procedencias?.first ?? nil
+            let info = try await InfoMidia.ler(copia)
+            let data = await DataMidia.ler(copia)
+            var o = opcoes
+            o.legenda = p
+            let extensao = (nome as NSString).pathExtension
+            let comLegenda = (nome as NSString).deletingPathExtension + "-legendado" + (extensao.isEmpty ? "" : "." + extensao)
+            converter(copia, nome: comLegenda, info: info, opcoes: o, data: data)
+            return nil
+        } catch {
+            try? FileManager.default.removeItem(at: copia)
+            return "Não consegui abrir o vídeo: \(error.localizedDescription)"
         }
     }
 
@@ -537,7 +738,8 @@ final class Estudio {
                                              hdr: info.hdr.rawValue, dolbyVision: info.dolbyVision, ambienteLux: nil, data: data)
             }
         }
-        let r = Retomada(tipo: .conversao, entradas: [], nome: nome, base: base, data: data, conversao: opcoes)
+        var r = Retomada(tipo: .conversao, entradas: [], nome: nome, base: base, data: data, conversao: opcoes)
+        r.procedencias = [procedencias[arquivo.path]]
         if prepararTrabalho(id, [arquivo], r) { executarConversao(id) }
     }
 
@@ -602,6 +804,7 @@ final class Estudio {
         r.bases = bases
         r.nomes = videos.map { $0.nome }
         r.datas = videos.map { $0.data }
+        r.procedencias = videos.map { procedencias[$0.url.path] }
         if prepararTrabalho(id, videos.map { $0.url }, r) { executarLote(id) }
     }
 
@@ -929,7 +1132,7 @@ final class Estudio {
                     switch tipo {
                     case .transcricao: try await self.guardarTranscricaoDaNuvem(id, r, base: base, inicio: inicio)
                     case .voz: try await self.guardarVozDaNuvem(id, r, inicio: inicio, base: personalizado ? base : nil)
-                    case .imagem, .drive, .pastaDrive: break   // imagens e Drive nunca vão para a nuvem
+                    case .imagem, .drive, .pastaDrive, .legenda: break   // nunca vão para a nuvem
                     case .video, .audio:
                         guard let tid = r["id"] as? Int, let item = self.historico.item(id) else { throw ErroApp("Resposta incompleta da nuvem.") }
                         let modo = tipo == .video ? "video" : "audio"

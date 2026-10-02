@@ -12,7 +12,9 @@ struct InfoMidia: Equatable {
     var temVideo = false
     var largura = 0               // já na orientação de exibição
     var altura = 0
-    var fps: Double = 0
+    var fps: Double = 0           // taxa real: a de pico quando o vídeo tem fps variável
+    var fpsMedio: Double = 0      // média (quadros ÷ duração); menor que `fps` quando é variável
+    var fpsVariavel: Bool { fpsMedio > 1 && fps - fpsMedio > 1 }
     var hdr: Transferencia = .sdr
     var dolbyVision = false
     var codecVideo = ""
@@ -28,7 +30,7 @@ struct InfoMidia: Equatable {
         var p: [String] = []
         if temVideo {
             p.append("\(largura)×\(altura)")
-            if fps > 0 { p.append(String(format: "%.0f fps", fps)) }
+            if fps > 0 { p.append(String(format: "%.0f fps", fps) + (fpsVariavel ? " (variável)" : "")) }
             p.append(codecVideo)
             p.append(dolbyVision ? "Dolby Vision" : hdr.rawValue)
         } else if temAudio {
@@ -39,6 +41,21 @@ struct InfoMidia: Equatable {
         return p.joined(separator: " · ")
     }
 
+    /// Vídeo de celular/gravação de tela costuma ter fps variável: o "nominal" é só a média
+    /// (ex.: gravado a 30, média 20 porque caiu no escuro). Converter pela média jogaria quadros fora;
+    /// vale a taxa de pico (o menor intervalo entre quadros), arredondada para uma taxa conhecida.
+    static func fpsReal(medio: Double, menorQuadro: CMTime) -> Double {
+        let s = CMTimeGetSeconds(menorQuadro)
+        guard medio > 1, s.isFinite, s > 0 else { return medio }
+        var pico = 1 / s
+        // intervalo quebrado entre dois quadros daria um pico absurdo: ignora
+        guard pico > medio * 1.05, pico <= medio * 3.2, pico <= 245 else { return medio }
+        for padrao in [24.0, 25, 30, 48, 50, 60, 90, 100, 120, 240] where abs(pico - padrao) / padrao < 0.04 {
+            pico = padrao
+        }
+        return pico
+    }
+
     static func ler(_ url: URL) async throws -> InfoMidia {
         let asset = AVURLAsset(url: url)
         var i = InfoMidia()
@@ -47,10 +64,12 @@ struct InfoMidia: Equatable {
         let videos = try await asset.loadTracks(withMediaType: .video)
         if let v = videos.first {
             let (tam, t, fps, fds) = try await v.load(.naturalSize, .preferredTransform, .nominalFrameRate, .formatDescriptions)
+            let menorQuadro = (try? await v.load(.minFrameDuration)) ?? .invalid
             let r = CGRect(origin: .zero, size: tam).applying(t)
             i.temVideo = true
             i.largura = Int(abs(r.width).rounded()); i.altura = Int(abs(r.height).rounded())
-            i.fps = Double(fps)
+            i.fpsMedio = Double(fps)
+            i.fps = Self.fpsReal(medio: Double(fps), menorQuadro: menorQuadro)
             if let fd = fds.first {
                 let sub = CMFormatDescriptionGetMediaSubType(fd)
                 i.codecVideo = Self.nomeCodec(sub)
@@ -141,6 +160,8 @@ struct OpcoesConversao: Codable, Equatable {
 
     /// Recorte / encaixe do quadro (nil = como o original). Vale para vídeo, GIF e WebP animado.
     var enquadramento: Enquadramento?
+    /// Legenda gravada na imagem (vem do editor de legendas). Tempos no relógio do vídeo original.
+    var legenda: ProjetoLegenda?
     // GIF e WebP animado (opcionais pelo mesmo motivo)
     var animLargura: Int?            // largura do resultado em px (nunca aumenta)
     var animFps: Int?
@@ -268,6 +289,7 @@ enum PresetConversao: String, CaseIterable, Identifiable {
         (n.inicio, n.fim) = trecho
         // escolhas do arquivo, não do preset
         n.enquadramento = o.enquadramento
+        n.legenda = o.legenda
         n.dataAgora = o.dataAgora
         n.manterLocal = o.manterLocal
         if n.acao != .semRecodificar { n.velocidade = velocidade }
@@ -499,8 +521,15 @@ enum ConversorVideo {
 
         // composição: orientação, enquadramento, escala, fps constante e espaço de cor de saída
         let cor = coresDeSaida(info, hdr: hdr)
+        // A composição entrega TODOS os quadros da fonte (no tempo deles); quem põe na grade de saída
+        // (fps constante, descarta o que sobra, repete o que falta) é o Bombeador. Uma grade fixa na
+        // composição perdia 1 quadro a cada 3 em vídeo com tempo em microssegundos (CapCut/ffmpeg:
+        // o quadro em 0,066667 s fica depois do instante 2/30 e nunca era mostrado → 20 fps).
+        let fpsFonte = (info.fps > 1 ? info.fps : 30) * (veloz ? max(1, o.velocidade) : 1)
         let comp = try await composicao(fonte: fonte, trilha: vUsar, tam: tam, transf: transf, duracao: duracaoInstr,
-                                        o: o, w: w, h: h, fps: fps, cor: cor)
+                                        o: o, w: w, h: h, fps: fps, cor: cor, fpsGrade: min(480, fpsFonte * 2),
+                                        tempoOriginal: Self.relogio(inicio: CMTimeGetSeconds(faixa.start),
+                                                                    velocidade: veloz ? o.velocidade : nil))
 
         let reader = try AVAssetReader(asset: fonte)
         if !veloz { reader.timeRange = faixa }
@@ -568,7 +597,7 @@ enum ConversorVideo {
         try await Bombeador.bombear(reader: reader, writer: writer,
                                     pares: pares,
                                     inicio: inicioSessao, duracao: CMTimeGetSeconds(duracaoSaida),
-                                    cancel: cancel, progresso: progresso)
+                                    cancel: cancel, progresso: progresso, quadro: duracaoDoQuadro(fps))
         return destino
     }
 
@@ -607,14 +636,20 @@ enum ConversorVideo {
     /// "Desfocado" usa o Core Image (fundo = o próprio quadro ampliado e desfocado);
     /// os outros modos só posicionam a camada (mais leve).
     static func composicao(fonte: AVAsset, trilha: AVAssetTrack, tam: CGSize, transf: CGAffineTransform, duracao: CMTime,
-                           o: OpcoesConversao, w: Int, h: Int, fps: Double, cor: [String: String]) async throws -> AVMutableVideoComposition {
+                           o: OpcoesConversao, w: Int, h: Int, fps: Double, cor: [String: String],
+                           fpsGrade: Double? = nil,
+                           tempoOriginal: (@Sendable (Double) -> Double)? = nil) async throws -> AVMutableVideoComposition {
         let exib = CGRect(origin: .zero, size: tam).applying(transf)
         let W = max(abs(exib.width), 1), H = max(abs(exib.height), 1)
         let cw = CGFloat(w), ch = CGFloat(h)
         let comp: AVMutableVideoComposition
-        if let e = o.enquadramento, e.modo == .desfocar {
+        let desfocar = o.enquadramento?.modo == .desfocar
+        let pintor = o.legenda.map { PintorLegenda(projeto: $0, tela: CGSize(width: w, height: h)) }
+        if desfocar || pintor != nil {
+            // Core Image: fundo desfocado e/ou legenda por cima do quadro
             let orient = orientacao(transf)
             let giraDeLado = orient == .left || orient == .right
+            let enq = o.enquadramento
             comp = try await AVMutableVideoComposition.videoComposition(with: fonte) { req in
                 let ext0 = req.sourceImage.extent
                 // o quadro chega sem a rotação do vídeo; se já vier girado, não gira de novo
@@ -623,21 +658,56 @@ enum ConversorVideo {
                 let src = girado.transformed(by: CGAffineTransform(translationX: -girado.extent.minX, y: -girado.extent.minY))
                 let sw = max(src.extent.width, 1), sh = max(src.extent.height, 1)
                 let tela = CGRect(x: 0, y: 0, width: cw, height: ch)
-                // frente: o vídeo inteiro, centrado
-                let s = min(cw / sw, ch / sh)
-                let frente = src.transformed(by: CGAffineTransform(scaleX: s, y: s))
-                    .transformed(by: CGAffineTransform(translationX: (cw - sw * s) / 2, y: (ch - sh * s) / 2))
-                // fundo: ampliado para cobrir, desfocado em 1/8 do tamanho (leve) e escurecido um pouco
-                let sf = max(cw / sw, ch / sh)
-                let reducao: CGFloat = 8
-                let fundo = src.transformed(by: CGAffineTransform(scaleX: sf / reducao, y: sf / reducao))
-                    .clampedToExtent()
-                    .applyingGaussianBlur(sigma: Double(max(cw, ch) / reducao) * 0.035)
-                    .transformed(by: CGAffineTransform(scaleX: reducao, y: reducao))
-                    .transformed(by: CGAffineTransform(translationX: (cw - sw * sf) / 2, y: (ch - sh * sf) / 2))
-                    .applyingFilter("CIExposureAdjust", parameters: [kCIInputEVKey: -0.7])
-                    .cropped(to: tela)
-                req.finish(with: frente.composited(over: fundo).cropped(to: tela), context: nil)
+                var quadro: CIImage
+                if desfocar {
+                    // frente: o vídeo inteiro, centrado
+                    let s = min(cw / sw, ch / sh)
+                    let frente = src.transformed(by: CGAffineTransform(scaleX: s, y: s))
+                        .transformed(by: CGAffineTransform(translationX: (cw - sw * s) / 2, y: (ch - sh * s) / 2))
+                    // fundo: ampliado para cobrir, desfocado em 1/8 do tamanho (leve) e escurecido um pouco
+                    let sf = max(cw / sw, ch / sh)
+                    let reducao: CGFloat = 8
+                    let fundo = src.transformed(by: CGAffineTransform(scaleX: sf / reducao, y: sf / reducao))
+                        .clampedToExtent()
+                        .applyingGaussianBlur(sigma: Double(max(cw, ch) / reducao) * 0.035)
+                        .transformed(by: CGAffineTransform(scaleX: reducao, y: reducao))
+                        .transformed(by: CGAffineTransform(translationX: (cw - sw * sf) / 2, y: (ch - sh * sf) / 2))
+                        .applyingFilter("CIExposureAdjust", parameters: [kCIInputEVKey: -0.7])
+                        .cropped(to: tela)
+                    quadro = frente.composited(over: fundo)
+                } else {
+                    // o mesmo enquadramento da camada, no sistema do Core Image (origem embaixo)
+                    var parte = CGRect(x: 0, y: 0, width: sw, height: sh)       // pedaço do quadro que vai para a saída
+                    var destino = tela
+                    switch enq?.modo {
+                    case .preencher?, .livre?:
+                        let r = enq!.recorte
+                        let rw = max(1, CGFloat(r.largura) * sw), rh = max(1, CGFloat(r.altura) * sh)
+                        parte = CGRect(x: CGFloat(r.x) * sw, y: sh - CGFloat(r.y) * sh - rh, width: rw, height: rh)
+                    case .caber?:
+                        let s = min(cw / sw, ch / sh)
+                        destino = CGRect(x: (cw - sw * s) / 2, y: (ch - sh * s) / 2, width: sw * s, height: sh * s)
+                    default: break
+                    }
+                    let sx = destino.width / parte.width, sy = destino.height / parte.height
+                    var img = src.cropped(to: parte)
+                        .transformed(by: CGAffineTransform(translationX: -parte.minX, y: -parte.minY))
+                    if sy < 0.98 || sx < 0.98 {
+                        // reduzindo: Lanczos (o redimensionamento comum do Core Image perde nitidez)
+                        img = img.clampedToExtent()
+                            .applyingFilter("CILanczosScaleTransform", parameters: [kCIInputScaleKey: sy, kCIInputAspectRatioKey: sx / sy])
+                            .cropped(to: CGRect(x: 0, y: 0, width: destino.width, height: destino.height))
+                    } else {
+                        img = img.transformed(by: CGAffineTransform(scaleX: sx, y: sy))
+                    }
+                    img = img.transformed(by: CGAffineTransform(translationX: destino.minX, y: destino.minY))
+                    quadro = img.composited(over: CIImage(color: .black).cropped(to: tela))
+                }
+                if let pintor {
+                    let t = CMTimeGetSeconds(req.compositionTime)
+                    if t.isFinite, let leg = pintor.imagem(em: tempoOriginal?(t) ?? t) { quadro = leg.composited(over: quadro) }
+                }
+                req.finish(with: quadro.cropped(to: tela), context: nil)
             }
         } else {
             // posição no espaço do quadro já girado (origem no canto de cima, à esquerda)
@@ -669,11 +739,23 @@ enum ConversorVideo {
             comp.instructions = [instr]
         }
         comp.renderSize = CGSize(width: w, height: h)
-        comp.frameDuration = duracaoDoQuadro(fps)
+        if let fpsGrade {
+            // tempo dos quadros = o da própria trilha; a grade (2× a fonte) só vale se o sistema ignorar isso
+            comp.sourceTrackIDForFrameTiming = trilha.trackID
+            comp.frameDuration = duracaoDoQuadro(fpsGrade)
+        } else {
+            comp.frameDuration = duracaoDoQuadro(fps)
+        }
         comp.colorPrimaries = cor[AVVideoColorPrimariesKey]
         comp.colorTransferFunction = cor[AVVideoTransferFunctionKey]
         comp.colorYCbCrMatrix = cor[AVVideoYCbCrMatrixKey]
         return comp
+    }
+
+    /// Do tempo da composição para o tempo do vídeo original (a legenda usa o relógio do original).
+    static func relogio(inicio: Double, velocidade: Double?) -> @Sendable (Double) -> Double {
+        guard let velocidade else { return { $0 } }
+        return { inicio + $0 * velocidade }
     }
 
     /// Rotação do vídeo (preferredTransform) como orientação de imagem, para o Core Image.
@@ -761,7 +843,7 @@ enum Bombeador {
     static func bombear(reader: AVAssetReader, writer: AVAssetWriter,
                         pares: [(AVAssetReaderOutput, AVAssetWriterInput)],
                         inicio: CMTime, duracao: Double, cancel: Cancelamento,
-                        progresso: @escaping ConversorVideo.Progresso) async throws {
+                        progresso: @escaping ConversorVideo.Progresso, quadro: CMTime? = nil) async throws {
         guard reader.startReading() else {
             throw ErroApp("Falha ao ler: \(reader.error?.localizedDescription ?? "desconhecida")")
         }
@@ -777,6 +859,8 @@ enum Bombeador {
                 grupo.enter()
                 let fila = DispatchQueue(label: "estudio.bombear.\(k)")
                 let fim = Terminou()
+                // vídeo (par 0) com `quadro`: os quadros vão para a grade de fps constante
+                let grade = (k == 0 && quadro != nil) ? Grade(quadro: quadro!, inicio: inicio) : nil
                 entrada.requestMediaDataWhenReady(on: fila) {
                     while entrada.isReadyForMoreMediaData && !fim.valor {
                         // só falha/cancelamento: o leitor pode virar .completed quando uma saída
@@ -784,8 +868,20 @@ enum Bombeador {
                         if cancel.cancelado || reader.status == .failed || reader.status == .cancelled {
                             entrada.markAsFinished(); fim.valor = true; grupo.leave(); return
                         }
-                        guard let amostra = saida.copyNextSampleBuffer() else {
-                            entrada.markAsFinished(); fim.valor = true; grupo.leave(); return
+                        let amostra: CMSampleBuffer
+                        if let grade, !grade.fila.isEmpty {
+                            amostra = grade.fila.removeFirst()
+                        } else {
+                            guard let lida = saida.copyNextSampleBuffer() else {
+                                entrada.markAsFinished(); fim.valor = true; grupo.leave(); return
+                            }
+                            if let grade {
+                                grade.receber(lida)
+                                if grade.fila.isEmpty { continue }        // quadro que sobrou (fps menor que o da fonte)
+                                amostra = grade.fila.removeFirst()
+                            } else {
+                                amostra = lida
+                            }
                         }
                         if k == 0, duracao > 0 {
                             let t = CMTimeGetSeconds(CMTimeSubtract(CMSampleBufferGetPresentationTimeStamp(amostra), inicio))
@@ -823,6 +919,47 @@ enum Bombeador {
     }
 
     final class Terminou: @unchecked Sendable { var valor = false; var ultimo = -1.0 }
+
+    /// Põe os quadros lidos numa grade de fps constante. Cada quadro vai para o instante da grade
+    /// mais próximo do tempo dele (tolerância de 1/4 de quadro para trás, o que absorve tempos
+    /// arredondados); quadro que cai num instante já ocupado é descartado (fps de saída menor);
+    /// instante sem quadro (fps variável) repete o anterior.
+    final class Grade: @unchecked Sendable {
+        let quadro: CMTime
+        let inicio: CMTime
+        var proximo: Int64 = 0
+        var anterior: CMSampleBuffer?
+        var fila: [CMSampleBuffer] = []
+
+        init(quadro: CMTime, inicio: CMTime) { self.quadro = quadro; self.inicio = inicio }
+
+        func receber(_ a: CMSampleBuffer) {
+            let p = CMTimeGetSeconds(CMTimeSubtract(CMSampleBufferGetPresentationTimeStamp(a), inicio))
+            let q = CMTimeGetSeconds(quadro)
+            guard p.isFinite, q.isFinite, q > 0 else { fila.append(a); return }
+            var k = Int64((p / q + 0.25).rounded(.down))
+            if anterior == nil { k = max(0, k) }
+            if k < proximo { return }
+            if let ant = anterior {
+                while proximo < k, let c = copia(ant, proximo) { fila.append(c); proximo += 1 }
+            }
+            guard let c = copia(a, k) else { return }
+            fila.append(c)
+            proximo = k + 1
+            anterior = a
+        }
+
+        private func copia(_ a: CMSampleBuffer, _ k: Int64) -> CMSampleBuffer? {
+            var t = CMSampleTimingInfo(duration: quadro,
+                                       presentationTimeStamp: CMTimeAdd(inicio, CMTimeMultiply(quadro, multiplier: Int32(clamping: k))),
+                                       decodeTimeStamp: .invalid)
+            var saida: CMSampleBuffer?
+            let r = CMSampleBufferCreateCopyWithNewTiming(allocator: kCFAllocatorDefault, sampleBuffer: a,
+                                                          sampleTimingEntryCount: 1, sampleTimingArray: &t,
+                                                          sampleBufferOut: &saida)
+            return r == noErr ? saida : nil
+        }
+    }
 }
 
 

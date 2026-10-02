@@ -61,8 +61,10 @@ struct NovoView: View {
                                 .buttonStyle(.glass)
                                 // .current: entrega o arquivo original (HEVC/Dolby Vision/60 fps); o padrão
                                 // (.automatic) converte para H.264 SDR 30 fps antes de chegar ao app
+                                // photoLibrary: .shared() faz a galeria entregar o identificador do vídeo, que o
+                                // "Editar novamente" usa para buscar o original sem o app guardar cópia
                                 PhotosPicker(selection: $videosGaleria, maxSelectionCount: 20, matching: .videos,
-                                             preferredItemEncoding: .current) {
+                                             preferredItemEncoding: .current, photoLibrary: .shared()) {
                                     Label(carregandoGaleria ? "Abrindo…" : "Galeria", systemImage: "photo.on.rectangle")
                                         .frame(maxWidth: .infinity).padding(.vertical, 6)
                                 }
@@ -141,13 +143,15 @@ struct NovoView: View {
                 Task {
                     defer { carregandoGaleria = false; videosGaleria = [] }
                     var urls: [URL] = [], nomes: [String] = [], falhas = 0
+                    var origens: [Procedencia?] = []
                     for item in novos {
                         if let v = try? await item.loadTransferable(type: VideoDaGaleria.self) {
                             urls.append(v.url); nomes.append(v.nome)
+                            origens.append(item.itemIdentifier.map { Procedencia(tipo: .fotos, fotos: $0, nome: v.nome) })
                         } else { falhas += 1 }
                     }
                     // um vídeo abre o conversor normal; vários viram um lote
-                    if !urls.isEmpty { estudio.importarVarios(urls, nomes: nomes) }
+                    if !urls.isEmpty { estudio.importarVarios(urls, nomes: nomes, origens: origens) }
                     urls.forEach { try? FileManager.default.removeItem(at: $0) }
                     if falhas > 0 { estudio.aviso = "Não consegui abrir \(falhas) vídeo(s) da galeria." }
                 }
