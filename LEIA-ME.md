@@ -175,6 +175,11 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
 - 0.13.1: buracos na transcrição. Depois da 1ª passada, intervalos de 3 s ou mais sem texto e com som
   (`TranscritorLocal.buracos` / `temSom`, volume médio acima de −38 dB) são transcritos de novo só naquele pedaço
   (`clipTimestamps`, sem divisão por pausas) e encaixados. Vale para a legenda e para a transcrição comum.
+- 0.13.2: o conserto de buracos da 0.13.1 não pegava o caso real (`Video Legendado/`: fala contínua, texto some de
+  0:15 a 0:32 no meio de uma frase). Agora: `arrumar` deixa cada trecho justo nas palavras dele e abre um trecho
+  novo onde há 3 s ou mais entre palavras (o buraco pode estar DENTRO de um trecho do Whisper); o pedaço é cortado
+  para um .wav próprio (`recortar`, até 26 s, corte em `pontoCalmo`) e transcrito sozinho, sem os filtros de
+  "trecho duvidoso"; se ainda vier vazio, pede só o texto e o editor reparte o tempo pelas palavras.
 - 0.13.1: todo "Apagar" pergunta antes (`Confirmacao` + `.confirmar` em Tema.swift). Linha deslizável das edições:
   o toque é da própria linha (não abre o vídeo no fim do arrasto) e saiu o menu de segurar. Pasta do Drive em
   Resultados: arrastar para a direita ou segurar → "Copiar link".

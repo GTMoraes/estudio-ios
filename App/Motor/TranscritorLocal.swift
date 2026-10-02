@@ -147,41 +147,121 @@ actor TranscritorLocal {
         }
         let resultados = try await w.transcribe(audioPath: audio.path, decodeOptions: opcoes)
         let duracao = await AudioUtil.duracao(arquivo)
-        var segmentos = Self.semInvencoes(converter(resultados).sorted { $0.inicio < $1.inicio }, duracao: duracao, idioma: idioma)
+        var segmentos = Self.arrumar(Self.semInvencoes(converter(resultados).sorted { $0.inicio < $1.inicio },
+                                                       duracao: duracao, idioma: idioma))
 
-        // O Whisper às vezes "pula" um pedaço: dá a janela por encerrada no meio e segue da próxima,
-        // deixando vários segundos de fala sem texto. Onde sobrou um buraco e o áudio não é silêncio,
-        // transcreve só aquele pedaço de novo e encaixa.
+        // O Whisper às vezes "pula" um pedaço: para no meio de uma frase e só volta vários segundos
+        // depois. Onde ficou um buraco de fala sem texto, aquele pedaço do áudio é cortado para um
+        // arquivo à parte e transcrito sozinho (sem os filtros que descartam trechos "duvidosos").
         if let d = duracao, d > 0 {
             for (a, b) in Self.buracos(segmentos, duracao: d).prefix(12) where Self.temSom(audio, de: a, ate: b) {
                 acompanhar.cancel()
                 avisar("Conferindo um trecho que ficou sem texto", nil)
-                var op = opcoes
-                let ini = max(0, a - 0.2), fim = min(d, b + 0.2)
-                op.clipTimestamps = [Float(ini), Float(fim)]
-                op.chunkingStrategy = ChunkingStrategy.none
-                guard let r = try? await w.transcribe(audioPath: audio.path, decodeOptions: op) else { continue }
-                var novos = converter(r)
-                // se os tempos vierem contados do começo do pedaço, passa para o relógio do arquivo
-                if let ultimo = novos.map(\.fim).max(), ultimo <= (fim - ini) + 1, ini > (fim - ini) + 1 {
-                    novos = novos.map { s in
-                        var n = s
-                        n.inicio += ini; n.fim += ini
-                        n.palavras = s.palavras.map { Segmento.Palavra(inicio: $0.inicio + ini, fim: $0.fim + ini, texto: $0.texto) }
-                        return n
+                // pedaços de até 26 s (a janela do Whisper é de 30), cortados num ponto calmo
+                let ini = max(0, a - 0.25), fim = min(d, b + 0.25)
+                var t = ini
+                while t < fim - 0.4 {
+                    var e = min(fim, t + 26)
+                    if e < fim { e = Self.pontoCalmo(audio, entre: t + 19, e: t + 26) ?? e }
+                    defer { t = e }
+                    guard let pedaco = Self.recortar(audio, de: t, ate: e) else { continue }
+                    defer { try? FileManager.default.removeItem(at: pedaco) }
+                    var op = opcoes
+                    op.chunkingStrategy = ChunkingStrategy.none
+                    op.noSpeechThreshold = nil
+                    op.logProbThreshold = nil
+                    op.compressionRatioThreshold = nil
+                    var novos = (try? await w.transcribe(audioPath: pedaco.path, decodeOptions: op)).map(converter) ?? []
+                    if novos.allSatisfy({ $0.texto.isEmpty }) {
+                        // última tentativa: só o texto, sem pedir tempos (o editor reparte o tempo pelas palavras)
+                        op.withoutTimestamps = true
+                        op.wordTimestamps = false
+                        novos = (try? await w.transcribe(audioPath: pedaco.path, decodeOptions: op)).map(converter) ?? []
+                        novos = novos.map { s in var n = s; n.palavras = []; n.inicio = 0; n.fim = e - t; return n }
                     }
+                    // do relógio do pedaço para o do arquivo, e só o que cai dentro do buraco
+                    let deslocados = novos.filter { !$0.texto.isEmpty }.map { s -> Segmento in
+                        var n = s
+                        n.inicio = min(e, t + max(0, s.inicio)); n.fim = min(e, t + max(0, s.fim))
+                        if n.fim <= n.inicio { n.inicio = t; n.fim = e }
+                        n.palavras = s.palavras.map { Segmento.Palavra(inicio: t + $0.inicio, fim: min(e, t + $0.fim), texto: $0.texto) }
+                            .filter { $0.inicio >= a - 0.15 && $0.inicio < b + 0.05 }
+                        if !s.palavras.isEmpty && n.palavras.isEmpty { n.texto = "" }       // tudo fora do buraco
+                        return n
+                    }.filter { !$0.texto.isEmpty }
+                    segmentos += Self.arrumar(Self.semInvencoes(deslocados, duracao: duracao, idioma: idioma))
                 }
-                novos = novos.filter { $0.inicio >= a - 0.4 && $0.inicio < b && !$0.texto.isEmpty }.map { s in
-                    var n = s
-                    n.fim = min(n.fim, b + 0.3)
-                    n.palavras = s.palavras.filter { $0.inicio >= a - 0.4 && $0.inicio < b + 0.3 }
-                    return n
-                }
-                segmentos += Self.semInvencoes(novos, duracao: duracao, idioma: idioma)
             }
             segmentos.sort { $0.inicio < $1.inicio }
         }
         return segmentos
+    }
+
+    /// Deixa cada trecho justo nas palavras dele: começo e fim pelos tempos das palavras, texto
+    /// igual às palavras, e um trecho novo onde há 3 s ou mais entre uma palavra e a seguinte
+    /// (é assim que um "pulo" do Whisper aparece: o trecho continua, mas as palavras somem).
+    static func arrumar(_ segmentos: [Segmento]) -> [Segmento] {
+        var saida: [Segmento] = []
+        for s in segmentos {
+            let ps = s.palavras.filter { !$0.texto.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            guard !ps.isEmpty else { saida.append(s); continue }
+            var grupo: [Segmento.Palavra] = []
+            func fechar() {
+                guard let p = grupo.first, let u = grupo.last else { return }
+                saida.append(Segmento(inicio: p.inicio, fim: max(u.fim, p.inicio),
+                                      texto: grupo.map(\.texto).joined().trimmingCharacters(in: .whitespacesAndNewlines),
+                                      palavras: grupo))
+                grupo = []
+            }
+            for p in ps {
+                if let u = grupo.last, p.inicio - u.fim >= 3 { fechar() }
+                grupo.append(p)
+            }
+            fechar()
+        }
+        return saida
+    }
+
+    /// Corta um pedaço do áudio para um arquivo .wav temporário.
+    static func recortar(_ audio: URL, de a: Double, ate b: Double) -> URL? {
+        guard let arq = try? AVAudioFile(forReading: audio) else { return nil }
+        let fmt = arq.processingFormat
+        let ini = AVAudioFramePosition(max(0, a) * fmt.sampleRate)
+        var falta = min(AVAudioFramePosition((b - a) * fmt.sampleRate), arq.length - ini)
+        guard falta > 0 else { return nil }
+        let destino = FileManager.default.temporaryDirectory.appendingPathComponent("trecho-" + UUID().uuidString + ".wav")
+        guard let saida = try? AVAudioFile(forWriting: destino, settings: fmt.settings),
+              let buf = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: AVAudioFrameCount(fmt.sampleRate * 5)) else { return nil }
+        arq.framePosition = ini
+        while falta > 0 {
+            let pedir = AVAudioFrameCount(min(AVAudioFramePosition(buf.frameCapacity), falta))
+            guard (try? arq.read(into: buf, frameCount: pedir)) != nil, buf.frameLength > 0,
+                  (try? saida.write(from: buf)) != nil else { break }
+            falta -= AVAudioFramePosition(buf.frameLength)
+        }
+        return destino
+    }
+
+    /// O instante mais calmo entre dois tempos (para cortar entre palavras, não no meio de uma).
+    static func pontoCalmo(_ audio: URL, entre a: Double, e b: Double) -> Double? {
+        guard b > a, let arq = try? AVAudioFile(forReading: audio) else { return nil }
+        let taxa = arq.processingFormat.sampleRate
+        let ini = AVAudioFramePosition(max(0, a) * taxa)
+        let total = min(AVAudioFramePosition((b - a) * taxa), arq.length - ini)
+        guard total > 0, let buf = AVAudioPCMBuffer(pcmFormat: arq.processingFormat, frameCapacity: AVAudioFrameCount(total)) else { return nil }
+        arq.framePosition = ini
+        guard (try? arq.read(into: buf, frameCount: AVAudioFrameCount(total))) != nil, let canal = buf.floatChannelData?[0] else { return nil }
+        let n = Int(buf.frameLength), janela = max(1, Int(taxa * 0.08))
+        guard n > janela * 2 else { return nil }
+        var menor = Double.infinity, onde = n / 2
+        var k = 0
+        while k + janela <= n {
+            var soma = 0.0
+            for i in k..<(k + janela) { let v = Double(canal[i]); soma += v * v }
+            if soma < menor { menor = soma; onde = k + janela / 2 }
+            k += janela / 2
+        }
+        return a + Double(onde) / taxa
     }
 
     /// Intervalos de 3 s ou mais sem nenhum texto (no começo, no meio e no fim).
