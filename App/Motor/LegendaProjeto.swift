@@ -37,6 +37,16 @@ struct EstiloLegenda: Codable, Equatable {
     var x = 0.5                      // centro da legenda, 0…1
     var y = 0.76
     var larguraMax = 0.86            // fração da largura do vídeo
+    // animação (opcionais: os projetos e estilos já salvos continuam abrindo)
+    var entrada: String?             // como o bloco entra: nil/"" nenhuma, "pulo", "zoom", "aparecer", "subir"
+    var pulaPalavra: Bool?           // a palavra falada dá um pulinho
+    var revela: Bool?                // as palavras aparecem uma a uma, conforme são faladas
+
+    static let entradas: [(nome: String, valor: String)] = [
+        ("Nenhuma", ""), ("Pulo", "pulo"), ("Zoom", "zoom"), ("Aparecer", "aparecer"), ("Subir", "subir"),
+    ]
+    /// A imagem do bloco depende de qual palavra está sendo falada?
+    var usaPalavra: Bool { destaque || pulaPalavra == true || revela == true }
 
     static let pesos = ["Normal", "Semi", "Negrito", "Pesado", "Black"]
     /// As do iPhone + as que você importou (Fontes).
@@ -399,6 +409,23 @@ enum Originais {
         if let d = try? JSONEncoder().encode(p) { try? d.write(to: arquivo(id, nomeDoProjeto(edicao)), options: .atomic) }
     }
 
+    // histórico de desfazer/refazer do editor (fica junto do projeto, para valer também depois de fechar)
+    struct Historico: Codable {
+        var passado: [ProjetoLegenda]
+        var futuro: [ProjetoLegenda]
+    }
+
+    static func lerHistorico(_ id: UUID) -> Historico? {
+        guard let d = try? Data(contentsOf: arquivo(id, "historico.json")) else { return nil }
+        return try? JSONDecoder().decode(Historico.self, from: d)
+    }
+
+    static func gravarHistorico(_ id: UUID, passado: [ProjetoLegenda], futuro: [ProjetoLegenda]) {
+        try? FileManager.default.createDirectory(at: pasta(id), withIntermediateDirectories: true)
+        let h = Historico(passado: Array(passado.suffix(40)), futuro: Array(futuro.suffix(40)))
+        if let d = try? JSONEncoder().encode(h) { try? d.write(to: arquivo(id, "historico.json"), options: .atomic) }
+    }
+
     static func apagarProjeto(_ id: UUID, edicao: UUID) {
         try? FileManager.default.removeItem(at: arquivo(id, nomeDoProjeto(edicao)))
     }
@@ -470,6 +497,21 @@ enum Fontes {
             familiasDe(u).forEach { nomes.insert($0) }
         }
         familias = nomes.sorted()
+    }
+
+    static func ehImportada(_ familia: String) -> Bool { importadas().contains(familia) }
+
+    /// Tira uma fonte importada do app (o arquivo e o registro).
+    static func apagar(_ familia: String) {
+        registrar()
+        for u in (try? FileManager.default.contentsOfDirectory(at: pasta, includingPropertiesForKeys: nil)) ?? []
+        where familiasDe(u).contains(familia) {
+            CTFontManagerUnregisterFontsForURL(u as CFURL, .process, nil)
+            try? FileManager.default.removeItem(at: u)
+        }
+        trava.lock()
+        familias.removeAll { $0 == familia }
+        trava.unlock()
     }
 
     static func importadas() -> [String] {

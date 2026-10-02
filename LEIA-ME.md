@@ -190,7 +190,13 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
 - 0.13.1: todo "Apagar" pergunta antes (`Confirmacao` + `.confirmar` em Tema.swift). Linha deslizável das edições:
   o toque é da própria linha (não abre o vídeo no fim do arrasto) e saiu o menu de segurar. Pasta do Drive em
   Resultados: arrastar para a direita ou segurar → "Copiar link".
-- Fora desta versão: animações da legenda (entrada com pulo/zoom).
+- 0.14.0: **animações da legenda** (Estilo › Animação). Entrada do bloco: Pulo, Zoom, Aparecer, Subir; "Pulo na
+  palavra falada" (a palavra cresce 18% e volta em 0,14 s); "Revelar palavra por palavra". O cálculo é um só
+  (`AnimacaoLegenda.estado`), usado na prévia do editor e no vídeo gravado. Campos novos do estilo são opcionais
+  (`entrada`, `pulaPalavra`, `revela`), então projetos e estilos antigos abrem igual. Os estilos prontos não mudaram.
+- 0.14.0: apagar uma fonte importada (Estilo › Texto, com confirmação). Desfazer/Refazer continua valendo depois de
+  fechar o editor (`historico.json` na pasta do projeto, últimos 40 passos de cada lado).
+- 0.14.0: o seletor de idioma ficou. Sem ele, um vídeo em outra língua seria tratado como português.
 
 ## Correções (0.11.1)
 

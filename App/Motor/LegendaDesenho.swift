@@ -55,8 +55,11 @@ enum DesenhoLegenda {
         return saida
     }
 
+    /// ativa: a palavra que está sendo falada (índice no bloco). escalaAtiva: tamanho dela (o "pulo").
+    /// Com `estilo.revela`, as palavras depois da ativa não são desenhadas (o lugar delas fica guardado,
+    /// então o texto não anda quando a próxima aparece).
     static func desenhar(_ palavras: [PalavraLegenda], ativa: Int?, estilo e: EstiloLegenda,
-                         linhasMax: Int, tela: CGSize) -> Saida? {
+                         linhasMax: Int, tela: CGSize, escalaAtiva: CGFloat = 1) -> Saida? {
         guard !palavras.isEmpty, tela.width > 4, tela.height > 4 else { return nil }
         let textos = palavras.map { e.maiusculas ? $0.texto.uppercased() : $0.texto }
         let lado = min(tela.width, tela.height)
@@ -104,7 +107,8 @@ enum DesenhoLegenda {
         let altTotal = alt + CGFloat(linhas.count - 1) * passo
         let contorno = max(0, CGFloat(e.contorno)) * fs
         let padCaixaX = fs * 0.38, padCaixaY = fs * 0.14
-        let margem = ceil(contorno + (e.sombra ? fs * 0.3 : 0) + (e.caixa ? padCaixaX : 0) + 2)
+        let margem = ceil(contorno + (e.sombra ? fs * 0.3 : 0) + (e.caixa ? padCaixaX : 0) + 2
+                          + (e.pulaPalavra == true ? fs * 0.3 : 0))
         let tamanho = CGSize(width: ceil(maior + margem * 2), height: ceil(altTotal + margem * 2))
 
         var origem = CGPoint(x: CGFloat(e.x) * tela.width - tamanho.width / 2,
@@ -140,6 +144,17 @@ enum DesenhoLegenda {
             }
             let sombra = { c.setShadow(offset: CGSize(width: 0, height: fs * 0.06), blur: fs * 0.16,
                                        color: UIColor.black.withAlphaComponent(0.85).cgColor) }
+            // "revelar": só até a palavra falada
+            func visivel(_ i: Int) -> Bool { e.revela != true || ativa == nil || i <= ativa! }
+            // a palavra falada pode vir maior (pulo), crescendo a partir do centro dela
+            func palavra(_ i: Int, _ p: CGPoint, _ desenha: () -> Void) {
+                guard i == ativa, abs(escalaAtiva - 1) > 0.001 else { desenha(); return }
+                let cx = p.x + ls[i] / 2, cy = p.y + alt / 2
+                c.saveGState()
+                c.translateBy(x: cx, y: cy); c.scaleBy(x: escalaAtiva, y: escalaAtiva); c.translateBy(x: -cx, y: -cy)
+                desenha()
+                c.restoreGState()
+            }
             if contorno > 0 {
                 c.saveGState()
                 c.setLineJoin(.round); c.setLineCap(.round)
@@ -147,15 +162,17 @@ enum DesenhoLegenda {
                 // largura positiva = só o traço; ele fica metade para fora, por isso 2×
                 let attrs: [NSAttributedString.Key: Any] = [.font: f, .kern: kern, .strokeColor: corCont,
                                                             .strokeWidth: contorno * 2 / fs * 100]
-                for (i, p) in pontos { (textos[i] as NSString).draw(at: p, withAttributes: attrs) }
+                for (i, p) in pontos where visivel(i) {
+                    palavra(i, p) { (textos[i] as NSString).draw(at: p, withAttributes: attrs) }
+                }
                 c.restoreGState()
             }
             c.saveGState()
             if e.sombra && contorno <= 0 { sombra() }
-            for (i, p) in pontos {
+            for (i, p) in pontos where visivel(i) {
                 let attrs: [NSAttributedString.Key: Any] = [.font: f, .kern: kern,
                                                             .foregroundColor: (i == ativa && e.destaque) ? corAtiva : cor]
-                (textos[i] as NSString).draw(at: p, withAttributes: attrs)
+                palavra(i, p) { (textos[i] as NSString).draw(at: p, withAttributes: attrs) }
             }
             c.restoreGState()
         }
@@ -171,7 +188,7 @@ final class PintorLegenda: @unchecked Sendable {
     private let blocos: [BlocoLegenda]
     private let tela: CGSize
     private let trava = NSLock()
-    private var guardadas: [Int: CIImage] = [:]
+    private var guardadas: [Int: (CIImage, CGPoint)] = [:]
     private var ordem: [Int] = []
     private var palpite = 0
 
@@ -198,16 +215,78 @@ final class PintorLegenda: @unchecked Sendable {
         trava.lock(); defer { trava.unlock() }
         guard let a = Self.ativo(blocos, projeto.palavras, em: t, palpite: palpite) else { return nil }
         palpite = a.bloco
-        let destaque = projeto.estilo.destaque
-        let chave = a.bloco * 4096 + (destaque ? a.palavra + 1 : 0)
-        if let i = guardadas[chave] { return i }
+        let e = projeto.estilo
         let b = blocos[a.bloco]
-        guard let s = DesenhoLegenda.desenhar(Array(projeto.palavras[b.indices]), ativa: destaque ? a.palavra : nil,
-                                              estilo: projeto.estilo, linhasMax: projeto.linhas, tela: tela) else { return nil }
-        let img = CIImage(cgImage: s.imagem)
-            .transformed(by: CGAffineTransform(translationX: s.quadro.minX, y: tela.height - s.quadro.maxY))
-        guardadas[chave] = img; ordem.append(chave)
-        if ordem.count > 6 { guardadas[ordem.removeFirst()] = nil }
-        return img
+        let anim = AnimacaoLegenda.estado(e, noBloco: t - b.inicio,
+                                          naPalavra: t - projeto.palavras[b.indices.lowerBound + a.palavra].inicio)
+        // a imagem só é refeita quando muda a palavra ou o degrau do "pulo" dela
+        let degrau = Int(((anim.escalaPalavra - 1) / 0.03).rounded())
+        let chave = a.bloco * 100_000 + (e.usaPalavra ? a.palavra + 1 : 0) * 32 + degrau
+        var guardada = guardadas[chave]
+        if guardada == nil {
+            guard let s = DesenhoLegenda.desenhar(Array(projeto.palavras[b.indices]), ativa: e.usaPalavra ? a.palavra : nil,
+                                                  estilo: e, linhasMax: projeto.linhas, tela: tela,
+                                                  escalaAtiva: 1 + CGFloat(degrau) * 0.03) else { return nil }
+            let img = CIImage(cgImage: s.imagem)
+                .transformed(by: CGAffineTransform(translationX: s.quadro.minX, y: tela.height - s.quadro.maxY))
+            guardada = (img, CGPoint(x: s.quadro.midX, y: tela.height - s.quadro.midY))
+            guardadas[chave] = guardada; ordem.append(chave)
+            if ordem.count > 14 { guardadas[ordem.removeFirst()] = nil }
+        }
+        guard let par = guardada else { return nil }
+        let img = par.0, centro = par.1
+        if anim.parada { return img }
+        // entrada do bloco: escala em torno do centro da legenda, deslocamento e transparência
+        let fs = CGFloat(e.tamanho) * min(tela.width, tela.height)
+        var saida = img.transformed(by: CGAffineTransform(translationX: -centro.x, y: -centro.y)
+            .concatenating(CGAffineTransform(scaleX: anim.escala, y: anim.escala))
+            .concatenating(CGAffineTransform(translationX: centro.x, y: centro.y - anim.desce * fs)))
+        if anim.opacidade < 0.999 {
+            let o = max(0, anim.opacidade)
+            saida = saida.applyingFilter("CIColorMatrix", parameters: [
+                "inputRVector": CIVector(x: o, y: 0, z: 0, w: 0), "inputGVector": CIVector(x: 0, y: o, z: 0, w: 0),
+                "inputBVector": CIVector(x: 0, y: 0, z: o, w: 0), "inputAVector": CIVector(x: 0, y: 0, z: 0, w: o)])
+        }
+        return saida
+    }
+}
+
+/// O estado da animação num instante: o mesmo cálculo na prévia do editor e no vídeo final.
+enum AnimacaoLegenda {
+    struct Estado {
+        var escala: CGFloat = 1          // do bloco inteiro
+        var opacidade: CGFloat = 1
+        var desce: CGFloat = 0           // deslocamento para baixo, em tamanhos de letra
+        var escalaPalavra: CGFloat = 1   // da palavra falada
+        var parada: Bool { escala == 1 && opacidade == 1 && desce == 0 }
+    }
+
+    /// noBloco / naPalavra: segundos desde que o bloco / a palavra falada começou.
+    static func estado(_ e: EstiloLegenda, noBloco tb: Double, naPalavra tp: Double) -> Estado {
+        var s = Estado()
+        func curva(_ t: Double, _ duracao: Double) -> Double { min(1, max(0, t / duracao)) }
+        func suave(_ p: Double) -> Double { 1 - (1 - p) * (1 - p) * (1 - p) }
+        switch e.entrada ?? "" {
+        case "pulo":
+            // passa um pouco do tamanho e volta
+            let p = curva(tb, 0.24), c1 = 1.70158, c3 = c1 + 1
+            let volta = 1 + c3 * pow(p - 1, 3) + c1 * pow(p - 1, 2)
+            s.escala = CGFloat(0.55 + 0.45 * volta)
+            s.opacidade = CGFloat(curva(tb, 0.08))
+        case "zoom":
+            let p = curva(tb, 0.2)
+            s.escala = CGFloat(0.8 + 0.2 * suave(p)); s.opacidade = CGFloat(p)
+        case "aparecer":
+            s.opacidade = CGFloat(curva(tb, 0.18))
+        case "subir":
+            let p = curva(tb, 0.2)
+            s.desce = CGFloat((1 - suave(p)) * 0.55); s.opacidade = CGFloat(p)
+        default: break
+        }
+        if e.pulaPalavra == true {
+            let p = curva(tp, 0.14)
+            s.escalaPalavra = CGFloat(1 + 0.18 * (1 - p))
+        }
+        return s
     }
 }

@@ -93,7 +93,10 @@ struct EditorLegenda: View {
             player.pause()
             if let observador { player.removeTimeObserver(observador) }
             observador = nil
-            if carregado { estudio.salvarLegenda(id, projeto) }
+                if carregado {
+                estudio.salvarLegenda(id, projeto)
+                Originais.gravarHistorico(id, passado: passado, futuro: futuro)
+            }
         }
         .sheet(item: $editando) { e in
             EditarBlocoLegenda(projeto: projeto, bloco: e.id,
@@ -191,16 +194,23 @@ struct EditorLegenda: View {
             }
             if let k, bs.indices.contains(k) {
                 let b = bs[k]
-                let saida = DesenhoLegenda.desenhar(Array(projeto.palavras[b.indices]),
-                                                    ativa: projeto.estilo.destaque ? (a?.bloco == k ? a?.palavra : 0) : nil,
+                let noAr = a?.bloco == k
+                // parado fora do bloco (ou na aba Posição): a legenda inteira, sem animação
+                let palavraAtiva: Int? = projeto.estilo.usaPalavra ? (noAr ? a?.palavra : b.indices.count - 1) : nil
+                let anim = animacao(b, noAr: noAr, palavra: a?.palavra ?? 0)
+                let saida = DesenhoLegenda.desenhar(Array(projeto.palavras[b.indices]), ativa: palavraAtiva,
                                                     estilo: projeto.estilo, linhasMax: projeto.linhas,
-                                                    tela: CGSize(width: tam.width * escalaTela, height: tam.height * escalaTela))
+                                                    tela: CGSize(width: tam.width * escalaTela, height: tam.height * escalaTela),
+                                                    escalaAtiva: anim.escalaPalavra)
                 if let saida {
                     Image(decorative: saida.imagem, scale: escalaTela)
                         .overlay {
                             if aba == .posicao { RoundedRectangle(cornerRadius: 6).stroke(Tema.acento, lineWidth: 1.5) }
                         }
-                        .offset(x: saida.quadro.minX / escalaTela, y: saida.quadro.minY / escalaTela)
+                        .scaleEffect(anim.escala)
+                        .opacity(Double(anim.opacidade))
+                        .offset(x: saida.quadro.minX / escalaTela,
+                                y: saida.quadro.minY / escalaTela + anim.desce * CGFloat(projeto.estilo.tamanho) * min(tam.width, tam.height))
                 }
             }
         }
@@ -208,6 +218,15 @@ struct EditorLegenda: View {
         .contentShape(.rect)
         .gesture(aba == .posicao ? arrastar(tam) : nil)
         .onTapGesture { if aba != .posicao { alternar() } }
+    }
+
+    /// A mesma animação do vídeo final (só enquanto o bloco está no ar e fora da aba Posição).
+    private func animacao(_ b: BlocoLegenda, noAr: Bool, palavra: Int) -> AnimacaoLegenda.Estado {
+        guard noAr, aba != .posicao, b.indices.contains(b.indices.lowerBound + palavra) else { return AnimacaoLegenda.Estado() }
+        var s = AnimacaoLegenda.estado(projeto.estilo, noBloco: tempo - b.inicio,
+                                       naPalavra: tempo - projeto.palavras[b.indices.lowerBound + palavra].inicio)
+        s.escalaPalavra = 1 + (((s.escalaPalavra - 1) / 0.03).rounded()) * 0.03      // os mesmos degraus do vídeo
+        return s
     }
 
     private func indiceParaMostrar(_ bs: [BlocoLegenda]) -> Int? {
@@ -279,6 +298,12 @@ struct EditorLegenda: View {
         do { u = try await estudio.videoDaLegenda(id) }
         catch { semVideo = true; motivo = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription; return }
         projeto = p
+        // o desfazer/refazer continua de onde parou da última vez
+        if let h = Originais.lerHistorico(id) { passado = h.passado; futuro = h.futuro }
+        if edicao != nil, let emAndamento = Originais.lerProjeto(id), emAndamento != p {
+            passado.append(emAndamento)          // abrir uma edição antiga: "desfazer" volta à versão em andamento
+            futuro = []
+        }
         info = try? await InfoMidia.ler(u)
         player.replaceCurrentItem(with: AVPlayerItem(url: u))
         let tocador = player
@@ -473,6 +498,18 @@ struct PainelEstiloLegenda: View {
                     Label("Importar fonte (.ttf ou .otf)", systemImage: "square.and.arrow.down").frame(maxWidth: .infinity).padding(.vertical, 2)
                 }
                 .buttonStyle(.glass)
+                if Fontes.ehImportada(projeto.estilo.fonte) {
+                    Button(role: .destructive) {
+                        let nome = projeto.estilo.fonte
+                        confirmar = Confirmacao(titulo: "Apagar a fonte “\(nome)”?",
+                                                mensagem: "Ela sai do app. Legendas e estilos salvos que usam essa fonte passam a usar a fonte padrão.") {
+                            Fontes.apagar(nome); projeto.estilo.fonte = ""; versao += 1
+                        }
+                    } label: {
+                        Label("Apagar esta fonte importada", systemImage: "trash").frame(maxWidth: .infinity).padding(.vertical, 2)
+                    }
+                    .buttonStyle(.glass)
+                }
                 Picker("Peso", selection: $projeto.estilo.peso) {
                     ForEach(Array(EstiloLegenda.pesos.enumerated()), id: \.offset) { k, n in Text(n).tag(k) }
                 }
@@ -486,6 +523,20 @@ struct PainelEstiloLegenda: View {
                 if projeto.estilo.destaque {
                     ColorPicker("Cor do destaque", selection: cor(\.corDestaque), supportsOpacity: false)
                 }
+            }
+            Cartao(titulo: "Animação", icone: "sparkles") {
+                Picker("Entrada do bloco", selection: Binding(get: { projeto.estilo.entrada ?? "" },
+                                                              set: { projeto.estilo.entrada = $0.isEmpty ? nil : $0 })) {
+                    ForEach(EstiloLegenda.entradas.indices, id: \.self) { k in
+                        Text(EstiloLegenda.entradas[k].nome).tag(EstiloLegenda.entradas[k].valor)
+                    }
+                }
+                Toggle("Pulo na palavra falada", isOn: Binding(get: { projeto.estilo.pulaPalavra ?? false },
+                                                                set: { projeto.estilo.pulaPalavra = $0 ? true : nil }))
+                Toggle("Revelar palavra por palavra", isOn: Binding(get: { projeto.estilo.revela ?? false },
+                                                                     set: { projeto.estilo.revela = $0 ? true : nil }))
+                Text("Dê play na prévia para ver. A animação sai igual no vídeo gravado.")
+                    .font(.caption).foregroundStyle(Tema.texto2)
             }
             Cartao(titulo: "Contorno e fundo", icone: "square.dashed") {
                 Regua(titulo: "Espessura do contorno", valor: $projeto.estilo.contorno, faixa: 0...0.3, porcento: true)
