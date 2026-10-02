@@ -238,6 +238,40 @@ struct ProjetoLegenda: Codable, Equatable {
         palavras.replaceSubrange(b.indices, with: lista)
     }
 
+    /// Bloco novo escrito à mão, a partir do instante `t` (onde o vídeo está parado). Entra entre os
+    /// blocos vizinhos sem passar por cima deles; o tempo é repartido pelas palavras e pode ser
+    /// acertado depois em "Editar". Devolve o identificador do bloco criado.
+    @discardableResult
+    mutating func inserirBloco(_ texto: String, em t: Double, duracaoTotal: Double) -> Int? {
+        var novas: [(String, Bool)] = []
+        let linhasTexto = texto.split(separator: "\n", omittingEmptySubsequences: true)
+        for (k, l) in linhasTexto.enumerated() {
+            let ps = l.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
+            for (j, p) in ps.enumerated() { novas.append((p, j == ps.count - 1 && k < linhasTexto.count - 1)) }
+        }
+        guard !novas.isEmpty else { return nil }
+        // posição: antes da primeira palavra que começa depois de t
+        let pos = palavras.firstIndex { $0.inicio > t } ?? palavras.count
+        let piso = pos > 0 ? palavras[pos - 1].fim : 0
+        let teto = pos < palavras.count ? palavras[pos].inicio : max(duracaoTotal, piso + 0.3)
+        let ini = min(max(piso, t), max(piso, teto - 0.3))
+        let querida = max(1.0, Double(novas.count) * 0.4)
+        let fim = max(ini + 0.1, min(teto, ini + querida))
+        let pesos = novas.map { Double($0.0.count + 1) }
+        let total = pesos.reduce(0, +)
+        var c = ini
+        var lista: [PalavraLegenda] = []
+        for (k, n) in novas.enumerated() {
+            let d = (fim - ini) * pesos[k] / total
+            lista.append(PalavraLegenda(texto: n.0, inicio: c, fim: c + d, fimDeBloco: k == novas.count - 1,
+                                        quebraDepois: n.1, abreTrecho: k == 0))
+            c += d
+        }
+        if pos > 0 { palavras[pos - 1].fimDeBloco = true; palavras[pos - 1].quebraDepois = false }
+        palavras.insert(contentsOf: lista, at: pos)
+        return pos
+    }
+
     /// Move o começo (ou o fim) do bloco, sem passar por cima dos vizinhos.
     mutating func moverInicio(_ b: BlocoLegenda, para t: Double) {
         let i = b.indices.lowerBound

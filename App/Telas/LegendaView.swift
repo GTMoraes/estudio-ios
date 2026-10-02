@@ -31,6 +31,14 @@ struct EditorLegenda: View {
     @State private var arrasteInicio: CGPoint?
     @State private var fimDoTrecho: Double?          // "tocar o bloco": para aqui
     @State private var confirmar: Confirmacao?
+    // desfazer / refazer
+    @State private var passado: [ProjetoLegenda] = []
+    @State private var futuro: [ProjetoLegenda] = []
+    @State private var ultimoRegistro = Date.distantPast
+    @State private var voltando = false
+    // bloco novo escrito à mão
+    @State private var pedindoBloco = false
+    @State private var textoNovo = ""
 
     struct Editado: Identifiable { let id: Int }
 
@@ -65,12 +73,22 @@ struct EditorLegenda: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Fechar", systemImage: "xmark") { fechar() } }
-                ToolbarItem(placement: .confirmationAction) {
+                ToolbarItemGroup(placement: .confirmationAction) {
+                    Button("Desfazer", systemImage: "arrow.uturn.backward") { desfazer() }.disabled(passado.isEmpty)
+                    Button("Refazer", systemImage: "arrow.uturn.forward") { refazer() }.disabled(futuro.isEmpty)
                     Button("Exportar") { player.pause(); exportando = true }.disabled(!carregado || info == nil)
                 }
             }
         }
         .task { await carregar() }
+        .onChange(of: projeto) { antes, _ in registrar(antes) }
+        .alert("Novo bloco em \(relogio(tempo))", isPresented: $pedindoBloco) {
+            TextField("Texto do bloco", text: $textoNovo)
+            Button("Criar") { criarBloco() }
+            Button("Cancelar", role: .cancel) {}
+        } message: {
+            Text("O bloco começa onde o vídeo está parado. Depois dá para acertar o tempo em Editar.")
+        }
         .onDisappear {
             player.pause()
             if let observador { player.removeTimeObserver(observador) }
@@ -94,6 +112,49 @@ struct EditorLegenda: View {
         } message: { Text(aviso ?? "") }
         .confirmar($confirmar)
         .preferredColorScheme(.dark)
+    }
+
+    // MARK: desfazer, refazer, bloco novo
+
+    /// Guarda o estado anterior a cada mudança. Mudanças seguidas (arrastar uma régua, a legenda)
+    /// contam como uma só: o ponto de volta é o de antes de começar.
+    private func registrar(_ antes: ProjetoLegenda) {
+        guard carregado else { return }
+        if voltando { voltando = false; return }
+        let agora = Date()
+        if agora.timeIntervalSince(ultimoRegistro) > 0.7 {
+            passado.append(antes)
+            if passado.count > 80 { passado.removeFirst() }
+        }
+        ultimoRegistro = agora
+        futuro = []
+    }
+
+    private func desfazer() {
+        guard let p = passado.popLast() else { return }
+        futuro.append(projeto)
+        voltando = p != projeto
+        ultimoRegistro = .distantPast
+        projeto = p
+        selecionado = nil
+    }
+
+    private func refazer() {
+        guard let p = futuro.popLast() else { return }
+        passado.append(projeto)
+        voltando = p != projeto
+        ultimoRegistro = .distantPast
+        let resto = futuro
+        projeto = p
+        futuro = resto
+        selecionado = nil
+    }
+
+    private func criarBloco() {
+        let txt = textoNovo.trimmingCharacters(in: .whitespacesAndNewlines)
+        textoNovo = ""
+        guard !txt.isEmpty, let novo = projeto.inserirBloco(txt, em: tempo, duracaoTotal: info?.duracao ?? tempo + 2) else { return }
+        selecionado = novo
     }
 
     // MARK: prévia
@@ -286,6 +347,10 @@ struct EditorLegenda: View {
                     if tocando, let novo, bs.indices.contains(novo) { withAnimation { rolo.scrollTo(bs[novo].id, anchor: .center) } }
                 }
             }
+            HStack(spacing: 8) {
+                botaoFerramenta("Novo bloco em \(relogio(tempo))", "plus") { player.pause(); textoNovo = ""; pedindoBloco = true }
+            }
+            .padding(.horizontal)
             if let s = selecionado, let b = bs.first(where: { $0.id == s }) {
                 HStack(spacing: 8) {
                     botaoFerramenta("Editar", "pencil") { player.pause(); editando = Editado(id: b.id) }

@@ -175,6 +175,13 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
 - 0.13.1: buracos na transcrição. Depois da 1ª passada, intervalos de 3 s ou mais sem texto e com som
   (`TranscritorLocal.buracos` / `temSom`, volume médio acima de −38 dB) são transcritos de novo só naquele pedaço
   (`clipTimestamps`, sem divisão por pausas) e encaixados. Vale para a legenda e para a transcrição comum.
+- 0.13.3: o buraco de 0:15 a 0:32 só acontecia com o idioma em "Português" (com "Detectar" o mesmo vídeo saía
+  inteiro, 3 vezes em 3). Duas diferenças entre os modos, as duas corrigidas, sem saber qual era a culpada:
+  (1) com idioma fixo o WhisperKit usa o "prefill cache" → desligado (`usePrefillCache = false`), e o conserto de
+  buracos passou a transcrever o pedaço no modo "detectar"; (2) o filtro de "outro alfabeto" de `semInvencoes` só
+  roda com idioma fixo → agora só descarta quando a maioria das letras é de outra escrita.
+- 0.13.3: editor de legenda com Desfazer/Refazer (pilha de projetos, mudanças seguidas contam como uma) e
+  "Novo bloco em <tempo>" (`ProjetoLegenda.inserirBloco`: texto à mão a partir de onde o vídeo está parado).
 - 0.13.2: o conserto de buracos da 0.13.1 não pegava o caso real (`Video Legendado/`: fala contínua, texto some de
   0:15 a 0:32 no meio de uma frase). Agora: `arrumar` deixa cada trecho justo nas palavras dele e abre um trecho
   novo onde há 3 s ou mais entre palavras (o buraco pode estar DENTRO de um trecho do Whisper); o pedaço é cortado

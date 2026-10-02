@@ -116,7 +116,7 @@ actor TranscritorLocal {
         let audio = try await AudioUtil.extrairAudio(arquivo)
         defer { if audio != arquivo { try? FileManager.default.removeItem(at: audio) } }
 
-        let opcoes = DecodingOptions(
+        var opcoes = DecodingOptions(
             verbose: false,
             task: .transcribe,
             language: idioma,
@@ -128,6 +128,11 @@ actor TranscritorLocal {
             wordTimestamps: true,
             chunkingStrategy: .vad
         )
+        // Com o idioma fixo (Português), o WhisperKit começa cada janela por um atalho pré-calculado
+        // ("prefill cache"). Num vídeo real isso fez a transcrição parar no meio de uma frase e pular
+        // 17 s, sempre no mesmo ponto; com "Detectar" (que não usa o atalho) o mesmo vídeo saía
+        // inteiro. Sem o atalho, o idioma continua fixo e custa só alguns milésimos por janela.
+        opcoes.usePrefillCache = false
         // o progresso do WhisperKit é um Progress; lido a cada meio segundo
         let acompanhar = Task {
             while !Task.isCancelled {
@@ -168,6 +173,10 @@ actor TranscritorLocal {
                     defer { try? FileManager.default.removeItem(at: pedaco) }
                     var op = opcoes
                     op.chunkingStrategy = ChunkingStrategy.none
+                    // o conserto usa o modo que comprovadamente não pula: o modelo decide o idioma do pedaço
+                    op.usePrefillPrompt = false
+                    op.detectLanguage = true
+                    op.language = nil
                     op.noSpeechThreshold = nil
                     op.logProbThreshold = nil
                     op.compressionRatioThreshold = nil
@@ -306,10 +315,19 @@ actor TranscritorLocal {
     /// "Legendas pela comunidade…"), com tempo depois do fim do arquivo. Tira o que começa depois do
     /// fim e, quando o idioma é português, o que vem em outro alfabeto.
     static func semInvencoes(_ segmentos: [Segmento], duracao: Double?, idioma: String?) -> [Segmento] {
+        // só quando a MAIORIA das letras é de uma escrita que não é a latina (cirílico, grego, árabe,
+        // hebraico, indianas, tailandês, chinês, japonês, coreano): um sinal estranho solto no meio
+        // de uma frase em português não pode derrubar a frase inteira
         func outroAlfabeto(_ t: String) -> Bool {
-            t.unicodeScalars.contains { u in
-                u.properties.isAlphabetic && !(u.value < 0x250 || (0x1E00...0x1EFF).contains(u.value))
+            var letras = 0, de_fora = 0
+            for u in t.unicodeScalars where u.properties.isAlphabetic {
+                letras += 1
+                let v = u.value
+                if (0x0370...0x052F).contains(v) || (0x0590...0x08FF).contains(v) || (0x0900...0x0E7F).contains(v)
+                    || (0x1100...0x11FF).contains(v) || (0x3040...0x30FF).contains(v) || (0x3400...0x9FFF).contains(v)
+                    || (0xAC00...0xD7AF).contains(v) { de_fora += 1 }
             }
+            return letras > 0 && de_fora * 2 > letras
         }
         return segmentos.compactMap { s -> Segmento? in
             if let d = duracao, d > 0, s.inicio >= d - 0.05 { return nil }
