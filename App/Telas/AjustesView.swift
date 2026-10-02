@@ -18,6 +18,7 @@ struct AjustesView: View {
     @State private var baixandoVoz: Double?
     @State private var msgVoz: String?
     @State private var espacoVoz: Int64 = 0
+    @State private var confirmar: Confirmacao?
 
     var body: some View {
         NavigationStack {
@@ -52,6 +53,7 @@ struct AjustesView: View {
             }
             .telaEscura()
             .navigationTitle("Ajustes")
+            .confirmar($confirmar)
             .onAppear { espaco = TranscritorLocal.tamanhoEmDisco(); espacoVoz = ModelosVoz.tamanhoEmDisco() + ModelosCoreML.tamanhoEmDisco() }
         }
     }
@@ -133,9 +135,12 @@ struct AjustesView: View {
                 Spacer()
                 if espaco > 0 {
                     Button("Apagar modelos", role: .destructive) {
-                        Task {
-                            await TranscritorLocal.shared.apagarModelos()
-                            espaco = TranscritorLocal.tamanhoEmDisco()
+                        confirmar = Confirmacao(titulo: "Apagar os modelos de transcrição?",
+                                                mensagem: "Será preciso baixar e preparar de novo na próxima transcrição.") {
+                            Task {
+                                await TranscritorLocal.shared.apagarModelos()
+                                espaco = TranscritorLocal.tamanhoEmDisco()
+                            }
                         }
                     }
                     .font(.footnote)
@@ -198,7 +203,10 @@ struct AjustesView: View {
                         .font(.footnote).foregroundStyle(Tema.texto2)
                     Spacer()
                     Button("Apagar modelos", role: .destructive) {
-                        ModelosVoz.apagar(); ModelosCoreML.apagar(); espacoVoz = ModelosVoz.tamanhoEmDisco()
+                        confirmar = Confirmacao(titulo: "Apagar os modelos de voz?",
+                                                mensagem: "Será preciso baixar e preparar de novo no próximo tratamento de voz.") {
+                            ModelosVoz.apagar(); ModelosCoreML.apagar(); espacoVoz = ModelosVoz.tamanhoEmDisco()
+                        }
                     }
                     .font(.footnote)
                 }
@@ -278,6 +286,7 @@ struct CartaoDrive: View {
     @State private var nova = ""
     @State private var msg: String?
     @State private var testando = false
+    @State private var confirmar: Confirmacao?
 
     var body: some View {
         Cartao(titulo: "Drive: chave de API", icone: "key.fill") {
@@ -290,7 +299,10 @@ struct CartaoDrive: View {
                         .buttonStyle(.glass).disabled(testando)
                     Spacer()
                     Button("Apagar chave", role: .destructive) {
-                        Drive.apagarChave(); temChave = false; msg = nil
+                        confirmar = Confirmacao(titulo: "Apagar a chave de API do Drive?",
+                                                mensagem: "Links públicos só voltam a abrir sem login depois de colar a chave de novo.") {
+                            Drive.apagarChave(); temChave = false; msg = nil
+                        }
                     }
                     .buttonStyle(.glass)
                 }
@@ -317,6 +329,7 @@ struct CartaoDrive: View {
             }
             if let msg { Text(msg).font(.footnote).foregroundStyle(Tema.texto2) }
         }
+        .confirmar($confirmar)
     }
 
     private func testar() {
@@ -406,6 +419,7 @@ struct CartaoOriginais: View {
     @Environment(Estudio.self) private var estudio
     @AppStorage("originaisDias") private var dias = 7
     @State private var espaco: Int64 = 0
+    @State private var confirmar: Confirmacao?
 
     var body: some View {
         Cartao(titulo: "Editar novamente", icone: "slider.horizontal.3") {
@@ -420,9 +434,16 @@ struct CartaoOriginais: View {
                 Text("Em uso: \(ByteCountFormatter.string(fromByteCount: espaco, countStyle: .file))").font(.subheadline)
                 Spacer()
                 Menu {
-                    Button("Manter os últimos 7 dias") { apagar(7) }
-                    Button("Manter os últimos 30 dias") { apagar(30) }
-                    Button("Apagar tudo", role: .destructive) { apagar(nil) }
+                    Button("Manter os últimos 7 dias") {
+                        confirmar = Confirmacao(titulo: "Apagar as cópias com mais de 7 dias?") { apagar(7) }
+                    }
+                    Button("Manter os últimos 30 dias") {
+                        confirmar = Confirmacao(titulo: "Apagar as cópias com mais de 30 dias?") { apagar(30) }
+                    }
+                    Button("Apagar tudo", role: .destructive) {
+                        confirmar = Confirmacao(titulo: "Apagar todas as cópias guardadas?",
+                                                mensagem: "O que veio pelo Compartilhar não poderá mais ser editado de novo.") { apagar(nil) }
+                    }
                 } label: {
                     Label("Apagar", systemImage: "trash").padding(.horizontal, 12).padding(.vertical, 7)
                         .background(.white.opacity(0.08), in: .capsule)
@@ -433,6 +454,7 @@ struct CartaoOriginais: View {
         }
         .onAppear { estudio.limparOriginaisAntigos(); espaco = Originais.tamanhoEmDisco() }
         .onChange(of: dias) { estudio.limparOriginaisAntigos(); espaco = Originais.tamanhoEmDisco() }
+        .confirmar($confirmar)
     }
 
     private func apagar(_ manter: Int?) {

@@ -30,6 +30,7 @@ struct EditorLegenda: View {
     @State private var margens = true
     @State private var arrasteInicio: CGPoint?
     @State private var fimDoTrecho: Double?          // "tocar o bloco": para aqui
+    @State private var confirmar: Confirmacao?
 
     struct Editado: Identifiable { let id: Int }
 
@@ -91,6 +92,7 @@ struct EditorLegenda: View {
         .alert("Aviso", isPresented: Binding(get: { aviso != nil }, set: { if !$0 { aviso = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(aviso ?? "") }
+        .confirmar($confirmar)
         .preferredColorScheme(.dark)
     }
 
@@ -289,7 +291,11 @@ struct EditorLegenda: View {
                     botaoFerramenta("Editar", "pencil") { player.pause(); editando = Editado(id: b.id) }
                     botaoFerramenta("Tocar", "play.circle") { tocarTrecho(b.inicio, b.fimExibicao) }
                     botaoFerramenta("Juntar", "arrow.down.to.line") { projeto.juntar(b) }
-                    botaoFerramenta("Apagar", "trash") { projeto.apagar(b); selecionado = nil }
+                    botaoFerramenta("Apagar", "trash") {
+                        confirmar = Confirmacao(titulo: "Apagar este bloco?", mensagem: "O texto deste trecho sai da legenda.") {
+                            projeto.apagar(b); selecionado = nil
+                        }
+                    }
                 }
                 .padding(.horizontal).padding(.bottom, 8)
             }
@@ -362,6 +368,7 @@ struct PainelEstiloLegenda: View {
     @State private var nomeNovo = ""
     @State private var importando = false
     @State private var aviso: String?
+    @State private var confirmar: Confirmacao?
 
     private func cor(_ kp: WritableKeyPath<EstiloLegenda, String>) -> Binding<Color> {
         Binding(get: { Color(uiColor: UIColor(hex: projeto.estilo[keyPath: kp])) },
@@ -378,7 +385,9 @@ struct PainelEstiloLegenda: View {
                             .contextMenu {
                                 if EstilosSalvos.ehSalvo(p.id) {
                                     Button("Apagar este estilo", systemImage: "trash", role: .destructive) {
-                                        EstilosSalvos.apagar(p.id); versao += 1
+                                        confirmar = Confirmacao(titulo: "Apagar o estilo “\(p.nome)”?") {
+                                            EstilosSalvos.apagar(p.id); versao += 1
+                                        }
                                     }
                                 }
                             }
@@ -444,6 +453,7 @@ struct PainelEstiloLegenda: View {
         } message: {
             Text("Guarda a aparência e o jeito dos blocos (palavras por bloco e linhas). A posição fica a de cada vídeo.")
         }
+        .confirmar($confirmar)
         .alert("Fonte", isPresented: Binding(get: { aviso != nil }, set: { if !$0 { aviso = nil } })) {
             Button("OK", role: .cancel) {}
         } message: { Text(aviso ?? "") }
@@ -702,8 +712,14 @@ struct PainelLegendaResultado: View {
     let item: Item
     var abrirEditor: (UUID?) -> Void
     @State private var previa: Previa?
+    @State private var confirmar: Confirmacao?
 
     struct Previa: Identifiable { let id: Int }
+
+    private func pedirExclusao(_ e: EdicaoLegenda) {
+        confirmar = Confirmacao(titulo: "Excluir esta edição legendada?", mensagem: "O vídeo sai do app. Isso não pode ser desfeito.",
+                                botao: "Excluir") { estudio.apagarEdicao(item.id, e) }
+    }
 
     private var edicoes: [EdicaoLegenda] { item.edicoes ?? [] }
 
@@ -716,11 +732,8 @@ struct PainelLegendaResultado: View {
         if !edicoes.isEmpty {
             Cartao(titulo: "Edições legendadas", icone: "film.stack") {
                 ForEach(Array(edicoes.enumerated()), id: \.element.id) { k, e in
-                    Deslizavel(apagar: { estudio.apagarEdicao(item.id, e) }) {
+                    Deslizavel(apagar: { pedirExclusao(e) }, tocar: { previa = Previa(id: k) }) {
                         linha(e, k)
-                    }
-                    .contextMenu {
-                        Button("Excluir", systemImage: "trash", role: .destructive) { estudio.apagarEdicao(item.id, e) }
                     }
                 }
                 Text("Toque para ver. A canetinha abre o editor com a legenda daquela edição. Arraste para a esquerda para excluir.")
@@ -729,6 +742,7 @@ struct PainelLegendaResultado: View {
             .fullScreenCover(item: $previa) { p in
                 VisualizadorVideos(item: soEdicoes, inicio: p.id)
             }
+            .confirmar($confirmar)
         }
     }
 
@@ -743,20 +757,15 @@ struct PainelLegendaResultado: View {
         let url = item.url(e.arquivo)
         let bytes = Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
         return HStack(spacing: 10) {
-            Button { previa = Previa(id: k) } label: {
-                HStack(spacing: 10) {
-                    MiniaturaVideo(url: url).frame(width: 54, height: 54)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(e.criada, format: .dateTime.day().month().hour().minute()).font(.subheadline.weight(.semibold))
-                        Text([e.estilo, bytes > 0 ? ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) : nil]
-                                .compactMap { $0 }.joined(separator: " · "))
-                            .font(.caption).foregroundStyle(Tema.texto2).lineLimit(1)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .contentShape(.rect)
+            // sem botão aqui: o toque é da linha deslizável (um botão abria o vídeo no fim do arrasto)
+            MiniaturaVideo(url: url).frame(width: 54, height: 54)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(e.criada, format: .dateTime.day().month().hour().minute()).font(.subheadline.weight(.semibold))
+                Text([e.estilo, bytes > 0 ? ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) : nil]
+                        .compactMap { $0 }.joined(separator: " · "))
+                    .font(.caption).foregroundStyle(Tema.texto2).lineLimit(1)
             }
-            .buttonStyle(.plain)
+            Spacer(minLength: 0)
             Button { abrirEditor(e.id) } label: { Image(systemName: "pencil").frame(width: 24, height: 24) }
                 .buttonStyle(.glass)
             ShareLink(item: url) { Image(systemName: "square.and.arrow.up").frame(width: 24, height: 24) }
@@ -767,17 +776,19 @@ struct PainelLegendaResultado: View {
 }
 
 /// Linha que desliza para a esquerda e mostra o botão de excluir (como nas listas do iPhone).
+/// O toque na linha é tratado aqui: enquanto o dedo arrasta (ou com o botão à mostra), tocar não abre nada.
 struct Deslizavel<Conteudo: View>: View {
     var apagar: () -> Void
+    var tocar: () -> Void
     @ViewBuilder var conteudo: Conteudo
     @State private var desloc: CGFloat = 0
     @State private var base: CGFloat = 0
+    @State private var arrastou = false
 
     var body: some View {
         ZStack(alignment: .trailing) {
             Button {
-                withAnimation(.snappy) { desloc = 0 }
-                base = 0
+                fecharBotao()
                 apagar()
             } label: {
                 Image(systemName: "trash.fill").foregroundStyle(.white)
@@ -787,20 +798,32 @@ struct Deslizavel<Conteudo: View>: View {
             .buttonStyle(.plain)
             .opacity(desloc < -8 ? 1 : 0)
             conteudo
+                .contentShape(.rect)
+                .onTapGesture {
+                    if base != 0 || arrastou { fecharBotao(); arrastou = false } else { tocar() }
+                }
                 .offset(x: desloc)
                 .simultaneousGesture(
-                    DragGesture(minimumDistance: 16)
+                    DragGesture(minimumDistance: 12)
                         .onChanged { v in
                             // só o arrasto de lado; o de cima para baixo continua rolando a tela
                             guard abs(v.translation.width) > abs(v.translation.height) * 1.5 else { return }
+                            arrastou = true
                             desloc = min(0, max(-80, base + v.translation.width))
                         }
                         .onEnded { _ in
                             let alvo: CGFloat = desloc < -36 ? -74 : 0
                             withAnimation(.snappy) { desloc = alvo }
                             base = alvo
+                            // o toque que o sistema ainda entregar logo depois do arrasto é ignorado
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { arrastou = false }
                         }
                 )
         }
+    }
+
+    private func fecharBotao() {
+        withAnimation(.snappy) { desloc = 0 }
+        base = 0
     }
 }

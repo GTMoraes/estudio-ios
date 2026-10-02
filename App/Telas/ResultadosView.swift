@@ -6,6 +6,7 @@ import Photos
 struct ResultadosView: View {
     @Environment(Estudio.self) private var estudio
     @State private var caminho = NavigationPath()
+    @State private var confirmar: Confirmacao?
 
     var body: some View {
         NavigationStack(path: $caminho) {
@@ -20,12 +21,28 @@ struct ResultadosView: View {
                                 .listRowBackground(Color.clear)
                                 .listRowSeparator(.hidden)
                                 .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                                .swipeActions(edge: .leading) {
+                                    // pasta do Drive: arrastar para a direita copia o link
+                                    if let p = item.pastaDrive {
+                                        Button { copiarLink(p) } label: { Label("Copiar link", systemImage: "link") }
+                                            .tint(Tema.acento)
+                                    }
+                                }
+                                .contextMenu {
+                                    if let p = item.pastaDrive {
+                                        Button("Copiar link", systemImage: "link") { copiarLink(p) }
+                                    }
+                                }
                         }
                         .onDelete { idx in
                             let ids = idx.map { estudio.historico.itens[$0].id }
-                            for id in ids {
-                                estudio.cancelar(id)
-                                estudio.historico.remover(id)
+                            guard !ids.isEmpty else { return }
+                            let nome = ids.count == 1 ? (estudio.historico.item(ids[0])?.titulo ?? "este resultado") : "\(ids.count) resultados"
+                            confirmar = Confirmacao(titulo: "Apagar “\(nome)”?", mensagem: "Os arquivos dele saem do app. Isso não pode ser desfeito.") {
+                                for id in ids {
+                                    estudio.cancelar(id)
+                                    estudio.historico.remover(id)
+                                }
                             }
                         }
                     }
@@ -34,6 +51,7 @@ struct ResultadosView: View {
             }
             .telaEscura()
             .navigationTitle("Resultados")
+            .confirmar($confirmar)
             .navigationDestination(for: UUID.self) { id in
                 if let it = estudio.historico.item(id), it.tipo == .pastaDrive, let p = it.pastaDrive {
                     // pasta do Drive guardada: abre direto; ao baixar, volta para a lista
@@ -50,6 +68,13 @@ struct ResultadosView: View {
                 PastaDrive(pasta: p, fechar: { caminho = NavigationPath() }).telaEscura()
             }
         }
+    }
+}
+
+extension ResultadosView {
+    fileprivate func copiarLink(_ p: Drive.Item) {
+        UIPasteboard.general.string = p.linkWeb
+        estudio.aviso = "Link copiado."
     }
 }
 
@@ -108,6 +133,7 @@ struct DetalheView: View {
         let edicao: UUID?            // nil = o projeto em andamento; senão, a versão de uma edição gravada
     }
     @State private var buscandoOriginal = false
+    @State private var confirmar: Confirmacao?
 
     var body: some View {
         if let item = estudio.historico.item(id) {
@@ -209,7 +235,12 @@ struct DetalheView: View {
                     }
 
                     Button(role: .destructive) {
-                        estudio.cancelar(id); estudio.historico.remover(id); voltar()
+                        confirmar = Confirmacao(titulo: "Apagar este resultado?",
+                                                mensagem: item.tipo == .legenda
+                                                    ? "A legenda, o projeto e todas as edições legendadas saem do app. Isso não pode ser desfeito."
+                                                    : "Os arquivos dele saem do app. Isso não pode ser desfeito.") {
+                            estudio.cancelar(id); estudio.historico.remover(id); voltar()
+                        }
                     } label: {
                         Label("Apagar", systemImage: "trash").frame(maxWidth: .infinity).padding(.vertical, 6)
                     }
@@ -229,6 +260,7 @@ struct DetalheView: View {
             .alert("Aviso", isPresented: Binding(get: { aviso != nil }, set: { if !$0 { aviso = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: { Text(aviso ?? "") }
+            .confirmar($confirmar)
             .fullScreenCover(item: $editor) { e in EditorLegenda(id: id, edicao: e.edicao) }
             // legenda que acabou de ser transcrita: entra direto no editor
             .task { abrirSePedido() }

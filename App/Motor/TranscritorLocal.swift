@@ -136,16 +136,89 @@ actor TranscritorLocal {
             }
         }
         defer { acompanhar.cancel() }
+        func converter(_ r: [TranscriptionResult]) -> [Segmento] {
+            r.flatMap { $0.segments }.map { s in
+                Segmento(inicio: Double(s.start), fim: Double(s.end),
+                         texto: s.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                         palavras: (s.words ?? []).map {
+                             Segmento.Palavra(inicio: Double($0.start), fim: Double($0.end), texto: $0.word)
+                         })
+            }
+        }
         let resultados = try await w.transcribe(audioPath: audio.path, decodeOptions: opcoes)
         let duracao = await AudioUtil.duracao(arquivo)
-        let segmentos = resultados.flatMap { $0.segments }.map { s in
-            Segmento(inicio: Double(s.start), fim: Double(s.end),
-                     texto: s.text.trimmingCharacters(in: .whitespacesAndNewlines),
-                     palavras: (s.words ?? []).map {
-                         Segmento.Palavra(inicio: Double($0.start), fim: Double($0.end), texto: $0.word)
-                     })
-        }.sorted { $0.inicio < $1.inicio }
-        return Self.semInvencoes(segmentos, duracao: duracao, idioma: idioma)
+        var segmentos = Self.semInvencoes(converter(resultados).sorted { $0.inicio < $1.inicio }, duracao: duracao, idioma: idioma)
+
+        // O Whisper às vezes "pula" um pedaço: dá a janela por encerrada no meio e segue da próxima,
+        // deixando vários segundos de fala sem texto. Onde sobrou um buraco e o áudio não é silêncio,
+        // transcreve só aquele pedaço de novo e encaixa.
+        if let d = duracao, d > 0 {
+            for (a, b) in Self.buracos(segmentos, duracao: d).prefix(12) where Self.temSom(audio, de: a, ate: b) {
+                acompanhar.cancel()
+                avisar("Conferindo um trecho que ficou sem texto", nil)
+                var op = opcoes
+                let ini = max(0, a - 0.2), fim = min(d, b + 0.2)
+                op.clipTimestamps = [Float(ini), Float(fim)]
+                op.chunkingStrategy = ChunkingStrategy.none
+                guard let r = try? await w.transcribe(audioPath: audio.path, decodeOptions: op) else { continue }
+                var novos = converter(r)
+                // se os tempos vierem contados do começo do pedaço, passa para o relógio do arquivo
+                if let ultimo = novos.map(\.fim).max(), ultimo <= (fim - ini) + 1, ini > (fim - ini) + 1 {
+                    novos = novos.map { s in
+                        var n = s
+                        n.inicio += ini; n.fim += ini
+                        n.palavras = s.palavras.map { Segmento.Palavra(inicio: $0.inicio + ini, fim: $0.fim + ini, texto: $0.texto) }
+                        return n
+                    }
+                }
+                novos = novos.filter { $0.inicio >= a - 0.4 && $0.inicio < b && !$0.texto.isEmpty }.map { s in
+                    var n = s
+                    n.fim = min(n.fim, b + 0.3)
+                    n.palavras = s.palavras.filter { $0.inicio >= a - 0.4 && $0.inicio < b + 0.3 }
+                    return n
+                }
+                segmentos += Self.semInvencoes(novos, duracao: duracao, idioma: idioma)
+            }
+            segmentos.sort { $0.inicio < $1.inicio }
+        }
+        return segmentos
+    }
+
+    /// Intervalos de 3 s ou mais sem nenhum texto (no começo, no meio e no fim).
+    static func buracos(_ s: [Segmento], duracao: Double) -> [(Double, Double)] {
+        var saida: [(Double, Double)] = []
+        var cursor = 0.0
+        for x in s {
+            if x.inicio - cursor >= 3 { saida.append((cursor, x.inicio)) }
+            cursor = max(cursor, x.fim)
+        }
+        if duracao - cursor >= 3 { saida.append((cursor, duracao)) }
+        return saida
+    }
+
+    /// O trecho tem som de verdade (fala, música) ou é silêncio? Volume médio acima de −38 dB.
+    /// Em silêncio não vale a pena transcrever de novo: é onde o Whisper inventa frases.
+    static func temSom(_ audio: URL, de a: Double, ate b: Double) -> Bool {
+        guard let arq = try? AVAudioFile(forReading: audio) else { return true }
+        let taxa = arq.processingFormat.sampleRate
+        let ini = AVAudioFramePosition(max(0, a) * taxa)
+        let total = min(AVAudioFramePosition((b - a) * taxa), arq.length - ini)
+        guard total > 0 else { return false }
+        arq.framePosition = ini
+        var soma = 0.0, n = 0.0
+        var falta = total
+        let pedaco = AVAudioFrameCount(taxa * 5)
+        guard let buf = AVAudioPCMBuffer(pcmFormat: arq.processingFormat, frameCapacity: pedaco) else { return true }
+        while falta > 0 {
+            let pedir = AVAudioFrameCount(min(AVAudioFramePosition(pedaco), falta))
+            guard (try? arq.read(into: buf, frameCount: pedir)) != nil, buf.frameLength > 0,
+                  let canal = buf.floatChannelData?[0] else { break }
+            for i in 0..<Int(buf.frameLength) { let v = Double(canal[i]); soma += v * v }
+            n += Double(buf.frameLength)
+            falta -= AVAudioFramePosition(buf.frameLength)
+        }
+        guard n > 0 else { return false }
+        return (soma / n).squareRoot() > 0.0125
     }
 
     /// O Whisper trabalha em janelas de 30 s; a última é completada com silêncio, e no silêncio ele

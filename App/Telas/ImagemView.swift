@@ -68,6 +68,7 @@ struct PainelImagens: View {
     @State private var editandoRecorte = false
     @State private var meus = MeusPresetsImagem.shared
     @State private var pedindoNome = false
+    @State private var confirmar: Confirmacao?
     @State private var nomeNovo = ""
 
     private var formatos: [FormatoImagem] { ConversorImagem.formatosDisponiveis }
@@ -147,7 +148,11 @@ struct PainelImagens: View {
                     ForEach(meus.lista) { p in
                         Button(p.nome) { let r = o.recorte; o = p.opcoes; o.recorte = r }
                             .buttonStyle(.glass)
-                            .contextMenu { Button("Apagar", role: .destructive) { meus.remover(p.id) } }
+                            .contextMenu {
+                                Button("Apagar", role: .destructive) {
+                                    confirmar = Confirmacao(titulo: "Apagar o preset “\(p.nome)”?") { meus.remover(p.id) }
+                                }
+                            }
                     }
                     Button { pedindoNome = true } label: { Label("Salvar", systemImage: "plus") }.buttonStyle(.glass)
                 }
@@ -155,6 +160,7 @@ struct PainelImagens: View {
             Text("Toque e segure um preset seu para apagar.").font(.caption).foregroundStyle(Tema.texto2)
         }
         // preso no cartão, não no botão laranja: lá o alerta herdava o estilo de vidro e o campo ficava esmagado
+        .confirmar($confirmar)
         .alert("Nome do preset", isPresented: $pedindoNome) {
             TextField("Ex.: WebP para o site", text: $nomeNovo)
             Button("Salvar") { _ = meus.salvar(nome: nomeNovo, opcoes: o); nomeNovo = "" }

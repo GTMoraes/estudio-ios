@@ -67,6 +67,29 @@ extension View {
     }
 }
 
+/// Pergunta antes de apagar. Uso: `confirmar = Confirmacao(titulo: "Apagar …?") { … }` e
+/// `.confirmar($confirmar)` num contêiner da tela (não num botão de vidro).
+struct Confirmacao: Identifiable {
+    let id = UUID()
+    var titulo: String
+    var mensagem = "Isso não pode ser desfeito."
+    var botao = "Apagar"
+    var acao: () -> Void
+}
+
+extension View {
+    func confirmar(_ c: Binding<Confirmacao?>) -> some View {
+        alert(c.wrappedValue?.titulo ?? "Tem certeza?",
+              isPresented: Binding(get: { c.wrappedValue != nil }, set: { if !$0 { c.wrappedValue = nil } }),
+              presenting: c.wrappedValue) { x in
+            Button(x.botao, role: .destructive) { x.acao() }
+            Button("Cancelar", role: .cancel) {}
+        } message: { x in
+            Text(x.mensagem)
+        }
+    }
+}
+
 func formatarDuracao(_ s: Double?) -> String? {
     guard let s, s.isFinite, s > 0 else { return nil }
     let t = Int(s.rounded())

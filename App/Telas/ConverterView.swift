@@ -32,6 +32,7 @@ struct PainelConverter: View {
     @State private var padrao = PadraoNome.ler(.conversao)
     @State private var dataOriginal = Date()
     @State private var editandoEnquadramento = false
+    @State private var confirmar: Confirmacao?
 
     private let personalizado = "p:" + PresetConversao.personalizado.rawValue
 
@@ -161,7 +162,9 @@ struct PainelConverter: View {
                             meus.salvar(nome: s.nome, opcoes: o, substituir: s.id)
                         }
                         Button("Apagar “\(s.nome)”", systemImage: "trash", role: .destructive) {
-                            meus.remover(s.id); escolher(personalizado)
+                            confirmar = Confirmacao(titulo: "Apagar o preset “\(s.nome)”?") {
+                                meus.remover(s.id); escolher(personalizado)
+                            }
                         }
                     } label: { Image(systemName: "ellipsis").frame(width: 22, height: 22) }
                     .buttonStyle(.glass)
@@ -169,6 +172,7 @@ struct PainelConverter: View {
             }
             .font(.footnote)
         }
+        .confirmar($confirmar)
         .alert("Nome do preset", isPresented: $pedindoNome) {
             TextField("Ex.: Reels leve", text: $nomeNovo)
             Button("Salvar") {

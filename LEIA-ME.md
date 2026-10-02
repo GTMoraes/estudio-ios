@@ -172,6 +172,12 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
 - 0.13.0: estilos salvos (`EstilosSalvos`, UserDefaults), fontes importadas (`Fontes`, em Application Support/Fontes,
   registradas com CoreText), tempo de cada palavra no editor de bloco (`moverPalavra`).
 - 0.13.0: GIF e WebP animado escolhem os quadros na grade de saída (como o vídeo desde a 0.11.1), sem espaçamento irregular.
+- 0.13.1: buracos na transcrição. Depois da 1ª passada, intervalos de 3 s ou mais sem texto e com som
+  (`TranscritorLocal.buracos` / `temSom`, volume médio acima de −38 dB) são transcritos de novo só naquele pedaço
+  (`clipTimestamps`, sem divisão por pausas) e encaixados. Vale para a legenda e para a transcrição comum.
+- 0.13.1: todo "Apagar" pergunta antes (`Confirmacao` + `.confirmar` em Tema.swift). Linha deslizável das edições:
+  o toque é da própria linha (não abre o vídeo no fim do arrasto) e saiu o menu de segurar. Pasta do Drive em
+  Resultados: arrastar para a direita ou segurar → "Copiar link".
 - Fora desta versão: animações da legenda (entrada com pulo/zoom).
 
 ## Correções (0.11.1)
