@@ -681,12 +681,10 @@ struct PainelResultadoDrive: View {
                 }
                 .buttonStyle(.glass)
             }
-            ShareLink(items: item.arquivos.map { item.url($0) }) {
-                Label(item.arquivos.count == 1 ? "Compartilhar / Salvar em Arquivos" : "Compartilhar os \(item.arquivos.count) / Salvar em Arquivos",
-                      systemImage: "square.and.arrow.up")
-                    .frame(maxWidth: .infinity).padding(.vertical, 4)
-            }
-            .buttonStyle(.glass)
+            MenuCompartilhar(urls: item.arquivos.map { item.url($0) }, nome: item.titulo,
+                             titulo: item.arquivos.count == 1 ? "Compartilhar / Salvar em Arquivos"
+                                                              : "Compartilhar os \(item.arquivos.count) / Salvar em Arquivos",
+                             aviso: $aviso)
         }
         if !videos.isEmpty {
             Cartao(titulo: videos.count == 1 ? "Vídeo" : "\(videos.count) vídeos", icone: "film.stack") {

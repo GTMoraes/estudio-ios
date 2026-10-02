@@ -72,7 +72,39 @@ struct VisualizadorVideos: View {
     @State private var atual: Int
     @State private var mostrarInfo = true
     @State private var aviso: String?
+    @State private var ocupado = false
+    @State private var zipado: ArquivoPronto?
     @Environment(\.dismiss) private var fechar
+    @Environment(Estudio.self) private var estudio
+
+    /// Qual entrada do trabalho gerou o vídeo à vista (para "Editar novamente este vídeo").
+    private var indiceEdicao: Int? {
+        guard let r = item.reedicao, r.tipo != .legenda, !item.arquivos.isEmpty else { return nil }
+        let nome = item.arquivos[min(atual, item.arquivos.count - 1)]
+        if r.tipo == .loteConversao {
+            guard let k = (r.saidas ?? []).firstIndex(where: { $0 == nome }), k < r.entradas.count else { return nil }
+            return k
+        }
+        return r.entradas.isEmpty ? nil : 0
+    }
+
+    private func editarEste(_ k: Int) {
+        ocupado = true
+        Task {
+            if let motivo = await estudio.editarNovamente(item.id, so: k, espera: 0.6) { aviso = motivo; ocupado = false }
+            else { fechar() }
+        }
+    }
+
+    private func compactar() {
+        let u = urlAtual
+        ocupado = true
+        Task {
+            do { let z = try await Zip.criar([u], nome: u.deletingPathExtension().lastPathComponent); zipado = ArquivoPronto(url: z) }
+            catch { aviso = "Não consegui criar o .zip: \(error.localizedDescription)" }
+            ocupado = false
+        }
+    }
 
     init(item: Item, inicio: Int) {
         self.item = item
@@ -113,8 +145,24 @@ struct VisualizadorVideos: View {
                     }
                     Spacer()
                     Button { salvarNoFotos(urlAtual) } label: { Image(systemName: "photo.badge.plus") }
+                    Spacer()
+                    Menu {
+                        if let k = indiceEdicao {
+                            Button { editarEste(k) } label: { Label("Editar novamente este vídeo", systemImage: "slider.horizontal.3") }
+                        }
+                        Button {
+                            let u = urlAtual
+                            fechar()
+                            estudio.usarEmNovaTarefa([u], espera: 0.6)
+                        } label: { Label("Usar em nova tarefa", systemImage: "plus.rectangle.on.rectangle") }
+                        Button { compactar() } label: { Label("Compartilhar como .zip", systemImage: "doc.zipper") }
+                    } label: {
+                        Image(systemName: ocupado ? "hourglass" : "ellipsis.circle")
+                    }
+                    .disabled(ocupado)
                 }
             }
+            .sheet(item: $zipado) { z in FolhaCompartilhar(itens: [z.url]).presentationDetents([.medium, .large]) }
             .alert("Aviso", isPresented: Binding(get: { aviso != nil }, set: { if !$0 { aviso = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: { Text(aviso ?? "") }

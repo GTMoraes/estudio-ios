@@ -201,6 +201,25 @@ struct DetalheView: View {
                                 .font(.caption).foregroundStyle(Tema.texto2)
                         }
                     }
+                    if item.estado == .pronto, item.tipo != .drive, item.tipo != .pastaDrive, !item.arquivos.isEmpty {
+                        let todos = item.arquivos.map { item.url($0) }
+                        let midias = todos.filter { ehMidia($0) }
+                        Cartao {
+                            if !midias.isEmpty {
+                                Button { estudio.usarEmNovaTarefa(midias) } label: {
+                                    Label("Usar em nova tarefa", systemImage: "plus.rectangle.on.rectangle")
+                                        .frame(maxWidth: .infinity).padding(.vertical, 4)
+                                }
+                                .buttonStyle(.glass)
+                                Text(midias.count == 1
+                                     ? "Abre este arquivo como se fosse novo: converter, tratar voz, transcrever ou legendar. Este resultado continua aqui."
+                                     : "Abre os \(midias.count) arquivos num lote novo. Para transcrever ou legendar um deles, abra o vídeo e toque em ⋯.")
+                                    .font(.caption).foregroundStyle(Tema.texto2)
+                            }
+                            MenuCompartilhar(urls: todos, nome: item.titulo,
+                                             titulo: todos.count == 1 ? "Compartilhar" : "Compartilhar todos", aviso: $aviso)
+                        }
+                    }
                     if item.estado == .pronto, item.tipo == .imagem || item.tipo == .video {
                         Cartao {
                             if let r = item.resumo, !r.isEmpty {
@@ -279,6 +298,13 @@ struct DetalheView: View {
     private func salvarTodasNoFotos(_ item: Item) {
         let urls = item.arquivos.map { item.url($0) }.filter { ehImagem($0) || ehVideoArquivo($0) }
         guard !urls.isEmpty else { return }
+        guard urls.count > 1 else { gravarNoFotos(urls); return }
+        confirmar = Confirmacao(titulo: "Salvar \(urls.count) arquivos no Fotos?",
+                                mensagem: "Eles entram na galeria do iPhone, um por um.",
+                                botao: "Salvar", destrutivo: false) { gravarNoFotos(urls) }
+    }
+
+    private func gravarNoFotos(_ urls: [URL]) {
         let videos = urls.filter(ehVideoArquivo).count
         let fotos = urls.count - videos
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { st in

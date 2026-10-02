@@ -254,12 +254,13 @@ final class Estudio {
 
     /// Os originais de um item, na pasta Originais/<id>: os que não estão lá são buscados de volta
     /// (galeria, Arquivos, Resultados). Erro com explicação quando não dá.
-    func garantirOriginais(_ id: UUID) async throws -> [URL] {
+    func garantirOriginais(_ id: UUID, so: Int? = nil) async throws -> [URL] {
         guard let r = historico.item(id)?.reedicao, !r.entradas.isEmpty else {
             throw ErroApp("Este resultado não guardou os ajustes da conversão.")
         }
         var urls: [URL] = []
         for (k, n) in r.entradas.enumerated() {
+            if let so, k != so { continue }                 // só o original de um dos vídeos
             let alvo = Originais.arquivo(id, n)
             if !FileManager.default.fileExists(atPath: alvo.path) {
                 guard let origem = r.procedencias.flatMap({ k < $0.count ? $0[k] : nil }) else {
@@ -280,14 +281,17 @@ final class Estudio {
 
     /// "Editar novamente": abre o conversor com o original e os ajustes que foram usados.
     /// Devolve o motivo quando não dá (original apagado ou movido).
-    func editarNovamente(_ id: UUID) async -> String? {
+    /// so: só uma das entradas (um vídeo de um lote). espera: segundos antes de abrir o conversor
+    /// (para dar tempo de fechar a tela cheia de onde o pedido veio).
+    func editarNovamente(_ id: UUID, so: Int? = nil, espera: Double = 0) async -> String? {
         let originais: [URL]
-        do { originais = try await garantirOriginais(id) }
+        do { originais = try await garantirOriginais(id, so: so) }
         catch { return (error as? LocalizedError)?.errorDescription ?? error.localizedDescription }
         guard let r = historico.item(id)?.reedicao else { return "Este resultado foi apagado." }
         // o conversor fica com o arquivo que recebe: trabalha numa cópia
         var copias: [URL] = []
-        for (k, u) in originais.enumerated() {
+        let quais: [Int] = so.map { [$0] } ?? Array(r.entradas.indices)
+        for (k, u) in zip(quais, originais) {
             let nome = r.tipo == .loteConversao ? (r.nomes.flatMap { k < $0.count ? $0[k] : nil } ?? u.lastPathComponent) : r.nome
             let c = Nuvem.semColisao(Self.pastaRecebidos.appendingPathComponent(nome))
             let origem = r.procedencias.flatMap { k < $0.count ? $0[k] : nil }
@@ -301,9 +305,28 @@ final class Estudio {
             if let o { ajustesGuardados[c.path] = AjusteConversao(opcoes: o, selecao: "p:" + PresetConversao.personalizado.rawValue) }
             copias.append(c)
         }
-        if copias.count == 1 { receber(.arquivo(copias[0], nome: copias[0].lastPathComponent)) }
-        else { receber(.videos(copias)) }
+        guard !copias.isEmpty else { return "Não achei o original deste vídeo." }
+        let nova: Entrada = copias.count == 1 ? .arquivo(copias[0], nome: copias[0].lastPathComponent) : .videos(copias)
+        receber(nova, depoisDe: espera)
         return nil
+    }
+
+    private func receber(_ e: Entrada, depoisDe espera: Double) {
+        guard espera > 0 else { receber(e); return }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(espera * 1_000_000_000))
+            self.receber(e)
+        }
+    }
+
+    /// "Usar em nova tarefa": arquivos de um resultado entram como se fossem novos (converter,
+    /// tratar voz, transcrever, legendar). O resultado de onde vieram continua lá.
+    func usarEmNovaTarefa(_ urls: [URL], espera: Double = 0) {
+        guard espera > 0 else { importarVarios(urls); return }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(espera * 1_000_000_000))
+            self.importarVarios(urls)
+        }
     }
 
     private func falhar(_ id: UUID, _ erro: Error) {

@@ -74,6 +74,7 @@ struct Confirmacao: Identifiable {
     var titulo: String
     var mensagem = "Isso não pode ser desfeito."
     var botao = "Apagar"
+    var destrutivo = true
     var acao: () -> Void
 }
 
@@ -82,7 +83,8 @@ extension View {
         alert(c.wrappedValue?.titulo ?? "Tem certeza?",
               isPresented: Binding(get: { c.wrappedValue != nil }, set: { if !$0 { c.wrappedValue = nil } }),
               presenting: c.wrappedValue) { x in
-            Button(x.botao, role: .destructive) { x.acao() }
+            if x.destrutivo { Button(x.botao, role: .destructive) { x.acao() } }
+            else { Button(x.botao) { x.acao() } }
             Button("Cancelar", role: .cancel) {}
         } message: { x in
             Text(x.mensagem)

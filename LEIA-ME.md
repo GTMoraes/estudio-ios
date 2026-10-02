@@ -196,6 +196,11 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
   (`entrada`, `pulaPalavra`, `revela`), então projetos e estilos antigos abrem igual. Os estilos prontos não mudaram.
 - 0.14.0: apagar uma fonte importada (Estilo › Texto, com confirmação). Desfazer/Refazer continua valendo depois de
   fechar o editor (`historico.json` na pasta do projeto, últimos 40 passos de cada lado).
+- 0.15.0: **"Usar em nova tarefa"** no resultado pronto e no menu ⋯ da prévia de cada vídeo (`Estudio.usarEmNovaTarefa`):
+  o arquivo do resultado entra como se fosse novo (converter, tratar voz, transcrever, legendar). "Editar novamente
+  este vídeo" na prévia (`editarNovamente(_, so:)`, um vídeo só de um lote). "Compartilhar todos": os arquivos como
+  estão ou dentro de um .zip feito pelo iPhone (`Zip` em Compartilhar.swift, sem biblioteca; também para 1 arquivo).
+  "Salvar as N no Fotos" pergunta antes.
 - 0.14.0: o seletor de idioma ficou. Sem ele, um vídeo em outra língua seria tratado como português.
 
 ## Correções (0.11.1)
