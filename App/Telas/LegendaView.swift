@@ -216,13 +216,13 @@ struct EditorLegenda: View {
         projeto = p
         info = try? await InfoMidia.ler(u)
         player.replaceCurrentItem(with: AVPlayerItem(url: u))
-        let p = player
-        observador = p.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 30), queue: .main) { t in
+        let tocador = player
+        observador = tocador.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 30), queue: DispatchQueue.main) { t in
             let s = CMTimeGetSeconds(t)
             MainActor.assumeIsolated {
                 if s.isFinite { tempo = s }
-                tocando = p.rate != 0
-                if let f = fimDoTrecho, s >= f { p.pause(); fimDoTrecho = nil }
+                tocando = tocador.rate != 0
+                if let f = fimDoTrecho, s >= f { tocador.pause(); fimDoTrecho = nil }
             }
         }
         carregado = true
