@@ -14,6 +14,7 @@ enum DesenhoLegenda {
         let pesos: [UIFont.Weight] = [.regular, .semibold, .bold, .heavy, .black]
         let peso = pesos[min(max(0, e.peso), pesos.count - 1)]
         if e.fonte.isEmpty { return .systemFont(ofSize: tamanho, weight: peso) }
+        Fontes.registrar()                   // as importadas precisam estar registradas antes do primeiro uso
         if e.fonte == "rounded" {
             let b = UIFont.systemFont(ofSize: tamanho, weight: peso)
             if let d = b.fontDescriptor.withDesign(.rounded) { return UIFont(descriptor: d, size: tamanho) }

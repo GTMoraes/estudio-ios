@@ -246,7 +246,7 @@ final class Estudio {
             }
             if let limite, item.criado >= limite { continue }
             for f in (try? fm.contentsOfDirectory(at: pasta, includingPropertiesForKeys: nil)) ?? []
-            where f.lastPathComponent != Originais.nomeProjeto {
+            where f.pathExtension.lowercased() != "json" {              // os projetos de legenda ficam
                 try? fm.removeItem(at: f)
             }
         }
@@ -570,15 +570,20 @@ final class Estudio {
             ) { msg, p in Task { @MainActor in self.etapa(id, msg, p) } }
             var projeto = ProjetoLegenda.criar(segs)
             if projeto.palavras.isEmpty { throw ErroApp("Não encontrei fala nesse vídeo.") }
-            if let p = PresetLegenda.todos.first(where: { $0.id == r.falhas?.first }) { projeto.aplicar(p) }
+            if let p = PresetLegenda.achar(r.falhas?.first) { projeto.aplicar(p) }
             Originais.gravarProjeto(id, projeto)
             let dur = await AudioUtil.duracao(arquivo)
             guard let item = self.historico.item(id) else { return }
             try FileManager.default.createDirectory(at: item.pasta, withIntermediateDirectories: true)
             let nomes = try self.gravarArquivosDaLegenda(item, projeto, base: base)
             self.concluir(id, arquivos: nomes, resumo: String(projeto.textoCorrido.prefix(400)), inicio: inicio, duracao: dur)
+            // terminou e não há outra folha aberta: já entra no editor
+            if self.entrada == nil { self.abaSelecionada = 1; self.abrirLegenda = id }
         }
     }
+
+    /// Legenda que acabou de ficar pronta: Resultados abre o item e o editor.
+    var abrirLegenda: UUID?
 
     private func gravarArquivosDaLegenda(_ item: Item, _ p: ProjetoLegenda, base: String) throws -> [String] {
         let nomes = ["\(base).srt", "\(base).txt"]
@@ -604,29 +609,85 @@ final class Estudio {
         }
     }
 
-    /// Grava a legenda no vídeo: é uma conversão comum (vira um item de vídeo em Resultados).
+    /// Grava a legenda no vídeo. O resultado fica DENTRO do item da legenda, na lista "Edições
+    /// legendadas" (a mais nova primeiro), com o projeto usado guardado ao lado para reabrir depois.
+    /// Enquanto grava, o item mostra o progresso; se falhar ou for cancelado, ele volta ao normal.
     func exportarLegenda(_ id: UUID, _ p: ProjetoLegenda, opcoes: OpcoesConversao) async -> String? {
+        guard let item = historico.item(id), item.estado == .pronto, tarefas[id] == nil else {
+            return "Este item ainda está gravando outra edição. Espere terminar."
+        }
         salvarLegenda(id, p)
-        guard let item = historico.item(id) else { return "Este item foi apagado." }
         let original: URL
         do { original = try await videoDaLegenda(id) }
         catch { return (error as? LocalizedError)?.errorDescription ?? error.localizedDescription }
-        let nome = item.reedicao?.nome ?? item.titulo
-        let copia = Nuvem.semColisao(Self.pastaRecebidos.appendingPathComponent(nome))
-        do {
-            try FileManager.default.copyItem(at: original, to: copia)
-            procedencias[copia.path] = item.reedicao?.procedencias?.first ?? nil
-            let info = try await InfoMidia.ler(copia)
-            let data = await DataMidia.ler(copia)
-            var o = opcoes
-            o.legenda = p
-            let extensao = (nome as NSString).pathExtension
-            let comLegenda = (nome as NSString).deletingPathExtension + "-legendado" + (extensao.isEmpty ? "" : "." + extensao)
-            converter(copia, nome: comLegenda, info: info, opcoes: o, data: data)
-            return nil
-        } catch {
-            try? FileManager.default.removeItem(at: copia)
-            return "Não consegui abrir o vídeo: \(error.localizedDescription)"
+        let edicao = UUID()
+        Originais.gravarProjeto(id, p, edicao: edicao)
+        var o = opcoes
+        o.legenda = p
+        let base = (item.baseSaida ?? Self.base(item.titulo)) + "-legendado"
+        let pasta = item.pasta
+        let nomeOriginal = item.reedicao?.nome ?? item.titulo
+        let aviso = "Gravando a legenda no vídeo"
+        historico.atualizar(id) { $0.estado = .processando; $0.mensagem = aviso; $0.progresso = nil }
+        rodar(id) {
+            var falha: String?
+            var gravado = false
+            do {
+                try await self.aguardarVez(id)
+                while true {
+                    let geracao = EstadoApp.shared.geracao
+                    do {
+                        self.etapa(id, aviso, 0)
+                        let info = try await InfoMidia.ler(original)
+                        var lux: Double?
+                        if info.hdr != .sdr { lux = await DetalhesVideo.ambienteLux(original) }
+                        let saida = try await ConversorVideo.converter(original, info: info, opcoes: o, pasta: pasta, base: base) { pr in
+                            Task { @MainActor in self.etapa(id, aviso, pr) }
+                        }
+                        let nome = saida.lastPathComponent
+                        let origem = OrigemMidia(nome: nomeOriginal, largura: info.largura, altura: info.altura,
+                                                 bytes: info.tamanhoBytes, duracao: info.duracao, fps: info.fps,
+                                                 codec: info.codecVideo, hdr: info.hdr.rawValue, dolbyVision: info.dolbyVision,
+                                                 ambienteLux: lux, data: nil)
+                        self.historico.atualizar(id) {
+                            var lista = $0.edicoes ?? []
+                            lista.insert(EdicaoLegenda(id: edicao, arquivo: nome, estilo: p.resumo), at: 0)
+                            $0.edicoes = lista
+                            var og = $0.origensMidia ?? [:]; og[nome] = origem; $0.origensMidia = og
+                        }
+                        gravado = true
+                        break
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        if EstadoApp.shared.geracao != geracao, !Task.isCancelled {
+                            // o app saiu da tela no meio: espera voltar e grava de novo
+                            self.etapa(id, "Pausado: volte ao Estúdio para continuar")
+                            await EstadoApp.shared.aguardarAtivo()
+                            continue
+                        }
+                        falha = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                        break
+                    }
+                }
+            } catch {
+                // cancelado (pelo botão ou pelo sistema): o item só volta ao normal
+            }
+            if !gravado { Originais.apagarProjeto(id, edicao: edicao) }
+            self.historico.atualizar(id) { $0.estado = .pronto; $0.mensagem = nil; $0.progresso = nil }
+            if let falha { self.aviso = "Não consegui gravar a legenda no vídeo: \(falha)" }
+        }
+        return nil
+    }
+
+    /// Apaga um vídeo legendado (e o projeto guardado dele) do item da legenda.
+    func apagarEdicao(_ id: UUID, _ edicao: EdicaoLegenda) {
+        guard let item = historico.item(id) else { return }
+        try? FileManager.default.removeItem(at: item.url(edicao.arquivo))
+        Originais.apagarProjeto(id, edicao: edicao.id)
+        historico.atualizar(id) {
+            $0.edicoes = ($0.edicoes ?? []).filter { $0.id != edicao.id }
+            $0.origensMidia?[edicao.arquivo] = nil
         }
     }
 
@@ -1124,6 +1185,11 @@ final class Estudio {
             aviso = "A GPU fechou o app no último tratamento de voz e foi desligada (Ajustes › Tratar voz no iPhone). O tratamento volta a rodar no processador, com o mesmo resultado, só que mais devagar."
         }
         for i in historico.itens where i.estado == .processando && tarefas[i.id] == nil {
+            if i.tipo == .legenda, i.reedicao != nil {
+                // já transcrita; o app fechou enquanto gravava uma edição: o item volta ao normal
+                historico.atualizar(i.id) { $0.estado = .pronto; $0.mensagem = nil; $0.progresso = nil }
+                continue
+            }
             if i.naNuvem, let job = i.trabalho {
                 let id = i.id, inicio = i.criado, base = i.baseSaida ?? Self.base(i.titulo), tipo = i.tipo
                 let personalizado = i.baseSaida != nil

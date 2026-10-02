@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import UIKit
 import Photos
+import CoreText
 
 // MARK: - modelo
 
@@ -38,6 +39,10 @@ struct EstiloLegenda: Codable, Equatable {
     var larguraMax = 0.86            // fração da largura do vídeo
 
     static let pesos = ["Normal", "Semi", "Negrito", "Pesado", "Black"]
+    /// As do iPhone + as que você importou (Fontes).
+    static var todasAsFontes: [(nome: String, valor: String)] {
+        fontes + Fontes.importadas().map { (nome: $0 + " (importada)", valor: $0) }
+    }
     static let fontes: [(nome: String, valor: String)] = [
         ("San Francisco", ""), ("SF arredondada", "rounded"), ("Avenir Next", "Avenir Next"),
         ("Avenir Next Condensed", "Avenir Next Condensed"), ("Helvetica Neue", "Helvetica Neue"),
@@ -55,6 +60,11 @@ struct PresetLegenda: Identifiable {
     let estilo: EstiloLegenda
     let palavrasPorBloco: Int
     let linhas: Int
+
+    /// Os prontos e os que você salvou.
+    static var comSalvos: [PresetLegenda] { todos + EstilosSalvos.ler() }
+
+    static func achar(_ id: String?) -> PresetLegenda? { comSalvos.first { $0.id == id } }
 
     static let todos: [PresetLegenda] = {
         var classica = EstiloLegenda()
@@ -235,6 +245,22 @@ struct ProjetoLegenda: Codable, Equatable {
         palavras[i].inicio = min(max(piso, t), palavras[i].fim - 0.03)
     }
 
+    /// Move o começo de uma palavra (o destaque e a legenda de poucas palavras seguem esse tempo).
+    /// A palavra anterior termina, no máximo, onde esta começa.
+    mutating func moverPalavra(_ i: Int, para t: Double) {
+        guard palavras.indices.contains(i) else { return }
+        let piso = i > 0 ? palavras[i - 1].inicio + 0.03 : 0
+        let novo = min(max(piso, t), palavras[i].fim - 0.03)
+        palavras[i].inicio = novo
+        if i > 0, palavras[i - 1].fim > novo { palavras[i - 1].fim = novo }
+    }
+
+    /// Resumo curto do jeito da legenda (para a lista de edições).
+    var resumo: String {
+        (palavrasPorBloco == 0 ? "Por frase" : palavrasPorBloco == 1 ? "1 palavra" : "\(palavrasPorBloco) palavras")
+            + " · " + (EstiloLegenda.todasAsFontes.first { $0.valor == estilo.fonte }?.nome ?? estilo.fonte)
+    }
+
     mutating func moverFim(_ b: BlocoLegenda, para t: Double) {
         let i = b.indices.upperBound - 1
         let teto = i + 1 < palavras.count ? palavras[i + 1].inicio : .infinity
@@ -326,14 +352,115 @@ enum Originais {
         return total
     }
 
-    static func lerProjeto(_ id: UUID) -> ProjetoLegenda? {
-        guard let d = try? Data(contentsOf: arquivo(id, nomeProjeto)) else { return nil }
+    /// edicao: nil = o projeto em andamento; senão, a versão guardada de um vídeo já gravado.
+    static func nomeDoProjeto(_ edicao: UUID?) -> String { edicao.map { "edicao-\($0.uuidString).json" } ?? nomeProjeto }
+
+    static func lerProjeto(_ id: UUID, edicao: UUID? = nil) -> ProjetoLegenda? {
+        guard let d = try? Data(contentsOf: arquivo(id, nomeDoProjeto(edicao))) else { return nil }
         return try? JSONDecoder().decode(ProjetoLegenda.self, from: d)
     }
 
-    static func gravarProjeto(_ id: UUID, _ p: ProjetoLegenda) {
+    static func gravarProjeto(_ id: UUID, _ p: ProjetoLegenda, edicao: UUID? = nil) {
         try? FileManager.default.createDirectory(at: pasta(id), withIntermediateDirectories: true)
-        if let d = try? JSONEncoder().encode(p) { try? d.write(to: arquivo(id, nomeProjeto), options: .atomic) }
+        if let d = try? JSONEncoder().encode(p) { try? d.write(to: arquivo(id, nomeDoProjeto(edicao)), options: .atomic) }
+    }
+
+    static func apagarProjeto(_ id: UUID, edicao: UUID) {
+        try? FileManager.default.removeItem(at: arquivo(id, nomeDoProjeto(edicao)))
+    }
+}
+
+// MARK: - estilos salvos e fontes importadas
+
+/// Estilos que você salvou no editor (aparência + jeito dos blocos), ao lado dos prontos.
+enum EstilosSalvos {
+    private struct Salvo: Codable {
+        var id: String
+        var nome: String
+        var estilo: EstiloLegenda
+        var palavrasPorBloco: Int
+        var linhas: Int
+    }
+    private static let chave = "estilosDeLegenda"
+
+    private static func lerSalvos() -> [Salvo] {
+        guard let d = UserDefaults.standard.data(forKey: chave) else { return [] }
+        return (try? JSONDecoder().decode([Salvo].self, from: d)) ?? []
+    }
+
+    private static func gravar(_ l: [Salvo]) {
+        if let d = try? JSONEncoder().encode(l) { UserDefaults.standard.set(d, forKey: chave) }
+    }
+
+    static func ler() -> [PresetLegenda] {
+        lerSalvos().map { PresetLegenda(id: $0.id, nome: $0.nome, estilo: $0.estilo, palavrasPorBloco: $0.palavrasPorBloco, linhas: $0.linhas) }
+    }
+
+    static func salvar(nome: String, _ p: ProjetoLegenda) {
+        var l = lerSalvos()
+        l.removeAll { $0.nome.caseInsensitiveCompare(nome) == .orderedSame }      // mesmo nome: substitui
+        l.append(Salvo(id: "meu-" + UUID().uuidString, nome: nome, estilo: p.estilo, palavrasPorBloco: p.palavrasPorBloco, linhas: p.linhas))
+        gravar(l)
+    }
+
+    static func apagar(_ id: String) { gravar(lerSalvos().filter { $0.id != id }) }
+    static func ehSalvo(_ id: String) -> Bool { id.hasPrefix("meu-") }
+}
+
+/// Fontes .ttf/.otf importadas: ficam em Application Support/Fontes e são registradas no app.
+enum Fontes {
+    static var pasta: URL {
+        let u = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Fontes", isDirectory: true)
+        try? FileManager.default.createDirectory(at: u, withIntermediateDirectories: true)
+        return u
+    }
+
+    private static let trava = NSLock()
+    private static var registradas = false
+    private static var familias: [String] = []
+
+    private static func familiasDe(_ u: URL) -> [String] {
+        let ds = (CTFontManagerCreateFontDescriptorsFromURL(u as CFURL) as? [CTFontDescriptor]) ?? []
+        return ds.compactMap { CTFontDescriptorCopyAttribute($0, kCTFontFamilyNameAttribute) as? String }
+    }
+
+    /// Registra as fontes guardadas (uma vez por abertura do app). Chamado antes de desenhar.
+    static func registrar() {
+        trava.lock(); defer { trava.unlock() }
+        guard !registradas else { return }
+        registradas = true
+        var nomes = Set<String>()
+        for u in (try? FileManager.default.contentsOfDirectory(at: pasta, includingPropertiesForKeys: nil)) ?? [] {
+            CTFontManagerRegisterFontsForURL(u as CFURL, .process, nil)
+            familiasDe(u).forEach { nomes.insert($0) }
+        }
+        familias = nomes.sorted()
+    }
+
+    static func importadas() -> [String] {
+        registrar()
+        trava.lock(); defer { trava.unlock() }
+        return familias
+    }
+
+    /// Copia o arquivo para o app e registra. Devolve o nome da família (para já selecionar).
+    static func importar(_ origem: URL) throws -> String {
+        registrar()
+        let acesso = origem.startAccessingSecurityScopedResource()
+        defer { if acesso { origem.stopAccessingSecurityScopedResource() } }
+        let destino = pasta.appendingPathComponent(origem.lastPathComponent)
+        try? FileManager.default.removeItem(at: destino)
+        try FileManager.default.copyItem(at: origem, to: destino)
+        guard let familia = familiasDe(destino).first else {
+            try? FileManager.default.removeItem(at: destino)
+            throw ErroApp("Esse arquivo não é uma fonte que o iPhone consiga usar (.ttf ou .otf).")
+        }
+        CTFontManagerRegisterFontsForURL(destino as CFURL, .process, nil)
+        trava.lock()
+        familias = Array(Set(familias + familiasDe(destino))).sorted()
+        trava.unlock()
+        return familia
     }
 }
 

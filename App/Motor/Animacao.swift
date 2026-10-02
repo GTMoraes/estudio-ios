@@ -34,8 +34,15 @@ enum Animacao {
 
         // SDR: o próprio iOS converte o HDR (GIF e WebP são 8 bits)
         let cor = ConversorVideo.coresDeSaida(info, hdr: false)
+        // todos os quadros da fonte, no tempo deles; a escolha dos que entram (um a cada 1/fps) é feita
+        // aqui embaixo. Com a grade fixa da composição, vídeo com tempo em microssegundos (CapCut)
+        // saía com espaçamento irregular entre os quadros.
+        let fpsFonte = (info.fps > 1 ? info.fps : 30) * (veloz ? max(1, o.velocidade) : 1)
         let comp = try await ConversorVideo.composicao(fonte: fonte, trilha: vUsar, tam: tam, transf: transf,
-                                                       duracao: duracaoInstr, o: o, w: w, h: h, fps: fps, cor: cor)
+                                                       duracao: duracaoInstr, o: o, w: w, h: h, fps: fps, cor: cor,
+                                                       fpsGrade: min(480, fpsFonte * 2),
+                                                       tempoOriginal: ConversorVideo.relogio(inicio: CMTimeGetSeconds(faixa.start),
+                                                                                             velocidade: veloz ? o.velocidade : nil))
         let reader = try AVAssetReader(asset: fonte)
         if !veloz { reader.timeRange = faixa }
         let saida = AVAssetReaderVideoCompositionOutput(videoTracks: [vUsar],
@@ -69,10 +76,19 @@ enum Animacao {
             defer { if let a = anim { var sobra: UnsafeMutablePointer<UInt8>?; var tam0 = 0; _ = cod_webpanim_fechar(a, 0, &sobra, &tam0); if let sobra { cod_webp_liberar(sobra) } } }
             var ultimo = -1.0
             var n = 0
+            var proximo = 0                       // próximo instante (k/fps) ainda sem quadro
             while let amostra = saida.copyNextSampleBuffer() {
                 if cancel.cancelado { throw CancellationError() }
                 guard let px = CMSampleBufferGetImageBuffer(amostra) else { continue }
-                let t = max(0, CMTimeGetSeconds(CMTimeSubtract(CMSampleBufferGetPresentationTimeStamp(amostra), inicio)))
+                let tFonte = max(0, CMTimeGetSeconds(CMTimeSubtract(CMSampleBufferGetPresentationTimeStamp(amostra), inicio)))
+                // cada quadro vai para o instante da grade mais próximo (1/4 de quadro de tolerância);
+                // o que cai num instante já ocupado sobra (a fonte tem mais fps que a animação)
+                let k = Int((tFonte * fps + 0.25).rounded(.down))
+                if k < proximo { continue }
+                // buraco (fps variável): o GIF tem tempo fixo por quadro, então repete o anterior
+                if gif, let anterior = quadrosGif.last { while proximo < k { quadrosGif.append(anterior); proximo += 1 } }
+                proximo = k + 1
+                let t = Double(k) / fps
                 CVPixelBufferLockBaseAddress(px, .readOnly)
                 defer { CVPixelBufferUnlockBaseAddress(px, .readOnly) }
                 guard let baseEnd = CVPixelBufferGetBaseAddress(px) else { continue }

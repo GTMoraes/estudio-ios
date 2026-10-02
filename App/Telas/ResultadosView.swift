@@ -43,6 +43,9 @@ struct ResultadosView: View {
                 }
             }
             .onChange(of: estudio.trabalhosCriados) { caminho = NavigationPath() }
+            .onChange(of: estudio.abrirLegenda) { _, novo in
+                if let novo { caminho = NavigationPath([novo]) }       // abre o item; ele abre o editor
+            }
             .navigationDestination(for: Drive.Item.self) { p in
                 PastaDrive(pasta: p, fechar: { caminho = NavigationPath() }).telaEscura()
             }
@@ -98,7 +101,12 @@ struct DetalheView: View {
     let id: UUID
     @State private var texto: String?
     @State private var aviso: String?
-    @State private var editorAberto = false
+    @State private var editor: EditorAberto?
+
+    struct EditorAberto: Identifiable {
+        let id = UUID()
+        let edicao: UUID?            // nil = o projeto em andamento; senão, a versão de uma edição gravada
+    }
     @State private var buscandoOriginal = false
 
     var body: some View {
@@ -145,11 +153,7 @@ struct DetalheView: View {
                         PainelResultadoDrive(item: item, aviso: $aviso, salvarNoFotos: salvarTodasNoFotos)
                     }
                     if item.estado == .pronto, item.tipo == .legenda {
-                        Cartao {
-                            BotaoPrincipal(titulo: "Abrir o editor de legenda", icone: "captions.bubble.fill") { editorAberto = true }
-                            Text("Blocos, texto, estilo e posição; depois grave a legenda no vídeo.")
-                                .font(.caption).foregroundStyle(Tema.texto2)
-                        }
+                        PainelLegendaResultado(item: item, abrirEditor: { editor = EditorAberto(edicao: $0) })
                     }
                     if item.estado == .pronto, let r = item.reedicao, r.tipo != .legenda {
                         Cartao {
@@ -225,10 +229,19 @@ struct DetalheView: View {
             .alert("Aviso", isPresented: Binding(get: { aviso != nil }, set: { if !$0 { aviso = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: { Text(aviso ?? "") }
-            .fullScreenCover(isPresented: $editorAberto) { EditorLegenda(id: id) }
+            .fullScreenCover(item: $editor) { e in EditorLegenda(id: id, edicao: e.edicao) }
+            // legenda que acabou de ser transcrita: entra direto no editor
+            .task { abrirSePedido() }
+            .onChange(of: estudio.abrirLegenda) { abrirSePedido() }
         } else {
             ContentUnavailableView("Item apagado", systemImage: "trash").telaEscura()
         }
+    }
+
+    private func abrirSePedido() {
+        guard estudio.abrirLegenda == id else { return }
+        estudio.abrirLegenda = nil
+        if editor == nil { editor = EditorAberto(edicao: nil) }
     }
 
     private func salvarTodasNoFotos(_ item: Item) {

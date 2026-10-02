@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import UniformTypeIdentifiers
 
 /// Editor de legendas: o vídeo em cima (com a legenda desenhada pela mesma função que grava o
 /// vídeo final) e, embaixo, três abas: blocos, estilo e posição.
@@ -8,6 +9,7 @@ struct EditorLegenda: View {
     @Environment(\.dismiss) private var fechar
     @Environment(\.displayScale) private var escalaTela
     let id: UUID
+    var edicao: UUID? = nil          // abrir a versão guardada de um vídeo já gravado
 
     enum Aba: String, CaseIterable { case blocos = "Blocos", estilo = "Estilo", posicao = "Posição" }
 
@@ -209,7 +211,7 @@ struct EditorLegenda: View {
 
     private func carregar() async {
         guard !carregado else { return }
-        guard let p = Originais.lerProjeto(id) else { semVideo = true; motivo = "O projeto desta legenda não foi encontrado."; return }
+        guard let p = Originais.lerProjeto(id, edicao: edicao) ?? Originais.lerProjeto(id) else { semVideo = true; motivo = "O projeto desta legenda não foi encontrado."; return }
         let u: URL
         do { u = try await estudio.videoDaLegenda(id) }
         catch { semVideo = true; motivo = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription; return }
@@ -355,6 +357,11 @@ struct EditorLegenda: View {
 
 struct PainelEstiloLegenda: View {
     @Binding var projeto: ProjetoLegenda
+    @State private var versao = 0                    // sobe quando um estilo ou uma fonte entra/sai
+    @State private var pedindoNome = false
+    @State private var nomeNovo = ""
+    @State private var importando = false
+    @State private var aviso: String?
 
     private func cor(_ kp: WritableKeyPath<EstiloLegenda, String>) -> Binding<Color> {
         Binding(get: { Color(uiColor: UIColor(hex: projeto.estilo[keyPath: kp])) },
@@ -365,23 +372,39 @@ struct PainelEstiloLegenda: View {
         VStack(spacing: 14) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
-                    ForEach(PresetLegenda.todos) { p in
-                        Button { projeto.aplicar(p) } label: {
-                            Text(p.nome).font(.footnote.weight(.semibold)).padding(.horizontal, 14).padding(.vertical, 8)
-                                .background(.white.opacity(0.1), in: .capsule)
-                        }
-                        .buttonStyle(.plain)
+                    ForEach(PresetLegenda.comSalvos) { p in
+                        Button { projeto.aplicar(p) } label: { fichaEstilo(p.nome, meu: EstilosSalvos.ehSalvo(p.id)) }
+                            .buttonStyle(.plain)
+                            .contextMenu {
+                                if EstilosSalvos.ehSalvo(p.id) {
+                                    Button("Apagar este estilo", systemImage: "trash", role: .destructive) {
+                                        EstilosSalvos.apagar(p.id); versao += 1
+                                    }
+                                }
+                            }
                     }
+                    Button { nomeNovo = ""; pedindoNome = true } label: { fichaEstilo("＋ Salvar o meu", meu: false) }
+                        .buttonStyle(.plain)
                 }
+                .id(versao)
             }
+            Text("Toque e segure num estilo seu para apagar.").font(.caption).foregroundStyle(Tema.texto2)
+                .frame(maxWidth: .infinity, alignment: .leading)
             Cartao(titulo: "Texto", icone: "textformat") {
                 Picker("Fonte", selection: $projeto.estilo.fonte) {
-                    ForEach(EstiloLegenda.fontes, id: \.valor) { f in Text(f.nome).tag(f.valor) }
+                    ForEach(EstiloLegenda.todasAsFontes, id: \.valor) { f in Text(f.nome).tag(f.valor) }
                 }
+                .id(versao)
+                Button { importando = true } label: {
+                    Label("Importar fonte (.ttf ou .otf)", systemImage: "square.and.arrow.down").frame(maxWidth: .infinity).padding(.vertical, 2)
+                }
+                .buttonStyle(.glass)
                 Picker("Peso", selection: $projeto.estilo.peso) {
                     ForEach(Array(EstiloLegenda.pesos.enumerated()), id: \.offset) { k, n in Text(n).tag(k) }
                 }
                 .pickerStyle(.segmented)
+                Text("Em fonte importada o peso só distingue normal de negrito (se a fonte tiver negrito).")
+                    .font(.caption).foregroundStyle(Tema.texto2)
                 Regua(titulo: "Tamanho", valor: $projeto.estilo.tamanho, faixa: 0.025...0.18, porcento: true, vezes: 1000)
                 ColorPicker("Cor", selection: cor(\.cor), supportsOpacity: false)
                 Toggle("MAIÚSCULAS", isOn: $projeto.estilo.maiusculas)
@@ -411,6 +434,37 @@ struct PainelEstiloLegenda: View {
                 .buttonStyle(.glass)
             }
         }
+        .alert("Salvar este estilo", isPresented: $pedindoNome) {
+            TextField("Nome do estilo", text: $nomeNovo)
+            Button("Salvar") {
+                let n = nomeNovo.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !n.isEmpty { EstilosSalvos.salvar(nome: n, projeto); versao += 1 }
+            }
+            Button("Cancelar", role: .cancel) {}
+        } message: {
+            Text("Guarda a aparência e o jeito dos blocos (palavras por bloco e linhas). A posição fica a de cada vídeo.")
+        }
+        .alert("Fonte", isPresented: Binding(get: { aviso != nil }, set: { if !$0 { aviso = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(aviso ?? "") }
+        .fileImporter(isPresented: $importando, allowedContentTypes: [.font, .data], allowsMultipleSelection: false) { r in
+            guard case .success(let urls) = r, let u = urls.first else { return }
+            do {
+                projeto.estilo.fonte = try Fontes.importar(u)
+                versao += 1
+            } catch {
+                aviso = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            }
+        }
+    }
+
+    private func fichaEstilo(_ nome: String, meu: Bool) -> some View {
+        HStack(spacing: 5) {
+            if meu { Image(systemName: "person.fill").font(.caption2) }
+            Text(nome).font(.footnote.weight(.semibold))
+        }
+        .padding(.horizontal, 14).padding(.vertical, 8)
+        .background(.white.opacity(0.1), in: .capsule)
     }
 }
 
@@ -446,6 +500,7 @@ struct EditarBlocoLegenda: View {
     @State private var texto = ""
     @State private var lido = false
     @State private var cortar: Int?
+    @State private var palavra: Int?
 
     private var atual: BlocoLegenda? { projeto.blocos.first { $0.id == bloco } }
 
@@ -469,6 +524,26 @@ struct EditarBlocoLegenda: View {
                                 Label("Salvar e tocar o bloco", systemImage: "play.circle").frame(maxWidth: .infinity).padding(.vertical, 4)
                             }
                             .buttonStyle(.glass)
+                        }
+                        Cartao(titulo: "Tempo de cada palavra", icone: "text.word.spacing") {
+                            Text("Toque numa palavra para acertar quando ela começa (vale para o destaque e para a legenda de poucas palavras).")
+                                .font(.footnote).foregroundStyle(Tema.texto2)
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 74), spacing: 6)], spacing: 6) {
+                                ForEach(Array(b.indices), id: \.self) { i in
+                                    Button { aplicarTexto(); palavra = i } label: {
+                                        Text(projeto.palavras[i].texto).font(.footnote).lineLimit(1)
+                                            .frame(maxWidth: .infinity).padding(.vertical, 7)
+                                            .background(palavra == i ? Tema.acento : .white.opacity(0.08), in: .capsule)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            if let w = palavra, b.indices.contains(w), projeto.palavras.indices.contains(w) {
+                                passo("“\(projeto.palavras[w].texto)” começa em", projeto.palavras[w].inicio, tamanho: 0.02) { d in
+                                    projeto.moverPalavra(w, para: projeto.palavras[w].inicio + d)
+                                }
+                                Text("Cada toque move 0,02 s.").font(.caption).foregroundStyle(Tema.texto2)
+                            }
                         }
                         if b.indices.count > 1 {
                             Cartao(titulo: "Dividir o bloco", icone: "scissors") {
@@ -514,17 +589,17 @@ struct EditarBlocoLegenda: View {
     private func aplicarTexto() {
         guard let b = atual, texto != projeto.texto(b) else { return }
         projeto.trocarTexto(b, por: texto)
-        cortar = nil
+        cortar = nil; palavra = nil
     }
 
-    private func passo(_ titulo: String, _ valor: Double, _ mover: @escaping (Double) -> Void) -> some View {
+    private func passo(_ titulo: String, _ valor: Double, tamanho: Double = 0.05, _ mover: @escaping (Double) -> Void) -> some View {
         HStack {
-            Text(titulo)
+            Text(titulo).lineLimit(1).minimumScaleFactor(0.7)
             Spacer()
-            Button { mover(-0.05) } label: { Image(systemName: "minus").frame(width: 22, height: 22) }.buttonStyle(.glass)
+            Button { mover(-tamanho) } label: { Image(systemName: "minus").frame(width: 22, height: 22) }.buttonStyle(.glass)
             Text(String(format: "%d:%05.2f", Int(valor) / 60, valor.truncatingRemainder(dividingBy: 60)))
                 .font(.body.monospacedDigit()).frame(width: 78)
-            Button { mover(0.05) } label: { Image(systemName: "plus").frame(width: 22, height: 22) }.buttonStyle(.glass)
+            Button { mover(tamanho) } label: { Image(systemName: "plus").frame(width: 22, height: 22) }.buttonStyle(.glass)
         }
     }
 }
@@ -564,7 +639,7 @@ struct ExportarLegenda: View {
                         linha("Taxa do vídeo", String(format: "%.1f Mb/s", PlanoConversao.taxaVideo(info, o) / 1_000_000))
                         linha("Tamanho estimado", ByteCountFormatter.string(fromByteCount: PlanoConversao.tamanhoEstimado(info, o), countStyle: .file))
                         BotaoPrincipal(titulo: "Gravar a legenda no vídeo", icone: "film") { gravar(opcoes); fechar() }
-                        Text("Vira um vídeo novo em Resultados. A legenda gravada sempre recodifica o vídeo; para outros ajustes (corte, formato, velocidade), use “Editar novamente” no resultado.")
+                        Text("O vídeo entra em “Edições legendadas”, neste mesmo item. A legenda gravada sempre recodifica o vídeo.")
                             .font(.caption).foregroundStyle(Tema.texto2)
                     }
                     Cartao(titulo: "Só os arquivos de legenda", icone: "doc.text") {
@@ -615,5 +690,117 @@ struct CamadaPlayer: UIViewRepresentable {
 
     func updateUIView(_ v: Tela, context: Context) {
         if v.camada.player !== player { v.camada.player = player }
+    }
+}
+
+
+// MARK: - no item de Resultados
+
+/// Item "Legenda" em Resultados: abrir o editor e a lista dos vídeos já gravados com legenda.
+struct PainelLegendaResultado: View {
+    @Environment(Estudio.self) private var estudio
+    let item: Item
+    var abrirEditor: (UUID?) -> Void
+    @State private var previa: Previa?
+
+    struct Previa: Identifiable { let id: Int }
+
+    private var edicoes: [EdicaoLegenda] { item.edicoes ?? [] }
+
+    var body: some View {
+        Cartao {
+            BotaoPrincipal(titulo: "Editar legenda", icone: "captions.bubble.fill") { abrirEditor(nil) }
+            Text("Blocos, texto, estilo e posição; depois grave a legenda no vídeo. Cada vídeo gravado entra na lista abaixo.")
+                .font(.caption).foregroundStyle(Tema.texto2)
+        }
+        if !edicoes.isEmpty {
+            Cartao(titulo: "Edições legendadas", icone: "film.stack") {
+                ForEach(Array(edicoes.enumerated()), id: \.element.id) { k, e in
+                    Deslizavel(apagar: { estudio.apagarEdicao(item.id, e) }) {
+                        linha(e, k)
+                    }
+                    .contextMenu {
+                        Button("Excluir", systemImage: "trash", role: .destructive) { estudio.apagarEdicao(item.id, e) }
+                    }
+                }
+                Text("Toque para ver. A canetinha abre o editor com a legenda daquela edição. Arraste para a esquerda para excluir.")
+                    .font(.caption).foregroundStyle(Tema.texto2)
+            }
+            .fullScreenCover(item: $previa) { p in
+                VisualizadorVideos(item: soEdicoes, inicio: p.id)
+            }
+        }
+    }
+
+    /// O item só com os vídeos legendados, para o visualizador que já existe.
+    private var soEdicoes: Item {
+        var c = item
+        c.arquivos = edicoes.map(\.arquivo)
+        return c
+    }
+
+    private func linha(_ e: EdicaoLegenda, _ k: Int) -> some View {
+        let url = item.url(e.arquivo)
+        let bytes = Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        return HStack(spacing: 10) {
+            Button { previa = Previa(id: k) } label: {
+                HStack(spacing: 10) {
+                    MiniaturaVideo(url: url).frame(width: 54, height: 54)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(e.criada, format: .dateTime.day().month().hour().minute()).font(.subheadline.weight(.semibold))
+                        Text([e.estilo, bytes > 0 ? ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) : nil]
+                                .compactMap { $0 }.joined(separator: " · "))
+                            .font(.caption).foregroundStyle(Tema.texto2).lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            Button { abrirEditor(e.id) } label: { Image(systemName: "pencil").frame(width: 24, height: 24) }
+                .buttonStyle(.glass)
+            ShareLink(item: url) { Image(systemName: "square.and.arrow.up").frame(width: 24, height: 24) }
+                .buttonStyle(.glass)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+/// Linha que desliza para a esquerda e mostra o botão de excluir (como nas listas do iPhone).
+struct Deslizavel<Conteudo: View>: View {
+    var apagar: () -> Void
+    @ViewBuilder var conteudo: Conteudo
+    @State private var desloc: CGFloat = 0
+    @State private var base: CGFloat = 0
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            Button {
+                withAnimation(.snappy) { desloc = 0 }
+                base = 0
+                apagar()
+            } label: {
+                Image(systemName: "trash.fill").foregroundStyle(.white)
+                    .frame(width: 64).frame(maxHeight: .infinity)
+                    .background(.red, in: .rect(cornerRadius: 12))
+            }
+            .buttonStyle(.plain)
+            .opacity(desloc < -8 ? 1 : 0)
+            conteudo
+                .offset(x: desloc)
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 16)
+                        .onChanged { v in
+                            // só o arrasto de lado; o de cima para baixo continua rolando a tela
+                            guard abs(v.translation.width) > abs(v.translation.height) * 1.5 else { return }
+                            desloc = min(0, max(-80, base + v.translation.width))
+                        }
+                        .onEnded { _ in
+                            let alvo: CGFloat = desloc < -36 ? -74 : 0
+                            withAnimation(.snappy) { desloc = alvo }
+                            base = alvo
+                        }
+                )
+        }
     }
 }

@@ -163,7 +163,16 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
   sem pausas, não tem outra pista). Frase que não cabe (36 letras × linhas) é repartida em pedaços parecidos, de
   preferência depois de vírgula. `TranscritorLocal.semInvencoes` tira o que o Whisper inventa no silêncio do fim
   (trecho que começa depois do fim do arquivo, ou em outro alfabeto quando o idioma é português).
-- Fora desta versão: importar fontes .ttf/.otf, salvar estilos próprios, ajustar o tempo palavra por palavra, animações.
+- 0.13.0: **Edições legendadas.** Gravar a legenda não cria mais um item novo: o vídeo entra em `Item.edicoes`
+  (`EdicaoLegenda`), dentro do item da legenda, mais novo primeiro; o projeto usado fica em
+  `Originais/<id>/edicao-<uuid>.json`. Na lista: tocar = prévia, canetinha = editor com aquela versão, compartilhar,
+  arrastar para a esquerda = excluir (`Deslizavel`). Enquanto grava, o item mostra o progresso; falha ou cancelamento
+  devolvem o item ao normal (`Estudio.exportarLegenda`). Ao terminar a transcrição, o editor abre sozinho
+  (`Estudio.abrirLegenda`).
+- 0.13.0: estilos salvos (`EstilosSalvos`, UserDefaults), fontes importadas (`Fontes`, em Application Support/Fontes,
+  registradas com CoreText), tempo de cada palavra no editor de bloco (`moverPalavra`).
+- 0.13.0: GIF e WebP animado escolhem os quadros na grade de saída (como o vídeo desde a 0.11.1), sem espaçamento irregular.
+- Fora desta versão: animações da legenda (entrada com pulo/zoom).
 
 ## Correções (0.11.1)
 

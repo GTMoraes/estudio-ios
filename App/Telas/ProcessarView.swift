@@ -216,7 +216,7 @@ struct PainelArquivo: View {
                 }
                 .pickerStyle(.segmented)
                 Picker("Começar com o estilo", selection: $presetLegenda) {
-                    ForEach(PresetLegenda.todos) { p in Text(p.nome).tag(p.id) }
+                    ForEach(PresetLegenda.comSalvos) { p in Text(p.nome).tag(p.id) }
                 }
                 Text("Dá para trocar tudo no editor, sem transcrever de novo.").font(.caption).foregroundStyle(Tema.texto2)
             }

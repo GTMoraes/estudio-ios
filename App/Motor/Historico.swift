@@ -27,6 +27,7 @@ struct Item: Codable, Identifiable, Equatable {
     var pedidoLink: PedidoLink?            // link: o pedido original, para "Tentar de novo"
     var pastaDrive: Drive.Item?            // pasta (ou arquivo) do Drive aberta antes: acesso rápido
     var reedicao: Retomada?                // conversão pronta: os ajustes usados; o original fica em Originais/<id>
+    var edicoes: [EdicaoLegenda]?          // legenda: vídeos já gravados com legenda (o mais novo primeiro)
 
     var pasta: URL { Historico.pastaResultados.appendingPathComponent(id.uuidString, isDirectory: true) }
     func url(_ nome: String) -> URL { pasta.appendingPathComponent(nome) }
@@ -43,6 +44,15 @@ struct Item: Codable, Identifiable, Equatable {
         case .legenda: return "captions.bubble"
         }
     }
+}
+
+/// Um vídeo gravado com legenda, dentro do item da legenda. O projeto usado (texto, blocos, estilo)
+/// fica em Originais/<item>/edicao-<id>.json, para a canetinha reabrir exatamente aquela versão.
+struct EdicaoLegenda: Codable, Equatable, Identifiable {
+    var id = UUID()
+    var arquivo: String
+    var criada = Date()
+    var estilo: String?               // resumo para a lista (ex.: "2 palavras · Viral")
 }
 
 /// Como era a imagem original (para comparar na tela de detalhes; o original é apagado).
