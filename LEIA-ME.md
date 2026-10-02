@@ -158,6 +158,11 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
   `Application Support/Originais/<id>/`, pelo prazo de Ajustes › Editar novamente (7 dias, 30 dias ou indefinido;
   botão Apagar: manter 7 dias / 30 dias / tudo). Original apagado ou movido: o botão explica em vez de falhar.
   A legenda deixa o vídeo à mão na mesma pasta (o editor usa) e o busca de novo se ele sair de lá.
+- 0.12.1: blocos por frase falada. O começo de cada trecho do transcritor fica marcado na palavra (`abreTrecho`;
+  projeto antigo usa a maiúscula) e um bloco nunca mistura o fim de uma frase com o começo da outra (vídeo editado,
+  sem pausas, não tem outra pista). Frase que não cabe (36 letras × linhas) é repartida em pedaços parecidos, de
+  preferência depois de vírgula. `TranscritorLocal.semInvencoes` tira o que o Whisper inventa no silêncio do fim
+  (trecho que começa depois do fim do arquivo, ou em outro alfabeto quando o idioma é português).
 - Fora desta versão: importar fontes .ttf/.otf, salvar estilos próprios, ajustar o tempo palavra por palavra, animações.
 
 ## Correções (0.11.1)

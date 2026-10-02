@@ -137,13 +137,39 @@ actor TranscritorLocal {
         }
         defer { acompanhar.cancel() }
         let resultados = try await w.transcribe(audioPath: audio.path, decodeOptions: opcoes)
-        return resultados.flatMap { $0.segments }.map { s in
+        let duracao = await AudioUtil.duracao(arquivo)
+        let segmentos = resultados.flatMap { $0.segments }.map { s in
             Segmento(inicio: Double(s.start), fim: Double(s.end),
                      texto: s.text.trimmingCharacters(in: .whitespacesAndNewlines),
                      palavras: (s.words ?? []).map {
                          Segmento.Palavra(inicio: Double($0.start), fim: Double($0.end), texto: $0.word)
                      })
         }.sorted { $0.inicio < $1.inicio }
+        return Self.semInvencoes(segmentos, duracao: duracao, idioma: idioma)
+    }
+
+    /// O Whisper trabalha em janelas de 30 s; a última é completada com silêncio, e no silêncio ele
+    /// às vezes "ouve" uma frase de fim de vídeo que viu no treino ("Продолжение следует...",
+    /// "Legendas pela comunidade…"), com tempo depois do fim do arquivo. Tira o que começa depois do
+    /// fim e, quando o idioma é português, o que vem em outro alfabeto.
+    static func semInvencoes(_ segmentos: [Segmento], duracao: Double?, idioma: String?) -> [Segmento] {
+        func outroAlfabeto(_ t: String) -> Bool {
+            t.unicodeScalars.contains { u in
+                u.properties.isAlphabetic && !(u.value < 0x250 || (0x1E00...0x1EFF).contains(u.value))
+            }
+        }
+        return segmentos.compactMap { s -> Segmento? in
+            if let d = duracao, d > 0, s.inicio >= d - 0.05 { return nil }
+            if idioma == "pt", outroAlfabeto(s.texto) { return nil }
+            var n = s
+            if let d = duracao, d > 0 {
+                n.fim = min(n.fim, d)
+                n.palavras = n.palavras.filter { $0.inicio < d }.map { p in
+                    var q = p; q.fim = min(q.fim, d); return q
+                }
+            }
+            return n
+        }
     }
 }
 

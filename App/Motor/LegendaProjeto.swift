@@ -13,6 +13,7 @@ struct PalavraLegenda: Codable, Equatable {
     var fim: Double
     var fimDeBloco = false
     var quebraDepois = false         // quebra de linha manual depois desta palavra
+    var abreTrecho: Bool?            // primeira palavra de um trecho do transcritor (começo de frase falada)
 }
 
 struct EstiloLegenda: Codable, Equatable {
@@ -119,29 +120,60 @@ struct ProjetoLegenda: Codable, Equatable {
 
     private static let fimDeFrase: Set<Character> = [".", "!", "?", "…"]
 
-    private func fechaFrase(_ i: Int) -> Bool {
+    /// A palavra `i` começa uma frase falada? O transcritor marca o começo de cada trecho; em vídeo
+    /// editado (pausas cortadas) é a única pista, porque não sobra pausa nem pontuação. Projeto antigo,
+    /// sem a marca: vale a maiúscula que o transcritor põe no começo do trecho.
+    private func abreFrase(_ i: Int, temMarcas: Bool) -> Bool {
+        if temMarcas { return palavras[i].abreTrecho == true }
+        guard let l = palavras[i].texto.first(where: { $0.isLetter }) else { return false }
+        return l.isUppercase
+    }
+
+    private func fechaFrase(_ i: Int, temMarcas: Bool) -> Bool {
         if let u = palavras[i].texto.last, Self.fimDeFrase.contains(u) { return true }
-        return i + 1 < palavras.count && palavras[i + 1].inicio - palavras[i].fim > 0.8
+        guard i + 1 < palavras.count else { return true }
+        if palavras[i + 1].inicio - palavras[i].fim > 0.7 { return true }
+        return abreFrase(i + 1, temMarcas: temMarcas)
     }
 
     /// Remonta os blocos (por frase ou por número de palavras). Apaga divisões e quebras manuais.
+    /// Um bloco nunca mistura o fim de uma frase com o começo da outra. Frase que não cabe num bloco
+    /// é repartida em pedaços de tamanho parecido (de preferência depois de uma vírgula), em vez de
+    /// encher um bloco e deixar uma sobra.
     mutating func reagrupar() {
         guard !palavras.isEmpty else { return }
-        var conta = 0, letras = 0
-        let limite = 30 * max(1, linhas)
-        for i in palavras.indices {
-            palavras[i].quebraDepois = false
-            conta += 1; letras += palavras[i].texto.count + 1
-            var fecha = fechaFrase(i)
+        let temMarcas = palavras.contains { $0.abreTrecho != nil }
+        let limite = 36 * max(1, linhas)
+        var a = 0
+        while a < palavras.count {
+            var b = a                                            // frase = a...b
+            while !fechaFrase(b, temMarcas: temMarcas) { b += 1 }
+            for i in a...b { palavras[i].quebraDepois = false; palavras[i].fimDeBloco = false }
             if palavrasPorBloco > 0 {
-                if conta >= palavrasPorBloco { fecha = true }
-            } else if i + 1 < palavras.count, letras + palavras[i + 1].texto.count > limite {
-                fecha = true                                   // frase comprida demais: quebra antes de estourar
+                var conta = 0
+                for i in a...b {
+                    conta += 1
+                    if conta >= palavrasPorBloco { palavras[i].fimDeBloco = true; conta = 0 }
+                }
+            } else {
+                let total = (a...b).reduce(0) { $0 + palavras[$1].texto.count + 1 } - 1
+                let pedacos = max(1, Int((Double(total) / Double(limite)).rounded(.up)))
+                if pedacos > 1 {
+                    let alvo = Double(total) / Double(pedacos)
+                    var letras = 0.0, feitos = 0
+                    for i in a..<b where feitos < pedacos - 1 {
+                        letras += Double(palavras[i].texto.count + 1)
+                        let proxima = Double(palavras[i + 1].texto.count + 1)
+                        let virgula = palavras[i].texto.hasSuffix(",") && letras >= alvo * 0.6
+                        if virgula || letras + proxima / 2 > alvo {
+                            palavras[i].fimDeBloco = true; letras = 0; feitos += 1
+                        }
+                    }
+                }
             }
-            palavras[i].fimDeBloco = fecha
-            if fecha { conta = 0; letras = 0 }
+            palavras[b].fimDeBloco = true
+            a = b + 1
         }
-        palavras[palavras.count - 1].fimDeBloco = true
     }
 
     // MARK: edição
@@ -236,6 +268,8 @@ struct ProjetoLegenda: Codable, Equatable {
                     p.palavras.append(PalavraLegenda(texto: w, inicio: t, fim: t + d)); t += d
                 }
             } else {
+                let primeira = p.palavras.count
+                defer { if primeira < p.palavras.count { p.palavras[primeira].abreTrecho = true } }
                 for w in comTempo {
                     let txt = w.texto.trimmingCharacters(in: .whitespacesAndNewlines)
                     // o Whisper às vezes separa a pontuação: cola na palavra anterior
@@ -247,6 +281,7 @@ struct ProjetoLegenda: Codable, Equatable {
                 }
             }
         }
+        for i in p.palavras.indices where p.palavras[i].abreTrecho == nil { p.palavras[i].abreTrecho = false }
         p.reagrupar()
         return p
     }
