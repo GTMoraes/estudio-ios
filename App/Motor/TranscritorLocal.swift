@@ -128,11 +128,16 @@ actor TranscritorLocal {
             wordTimestamps: true,
             chunkingStrategy: .vad
         )
-        // Com o idioma fixo (Português), o WhisperKit começa cada janela por um atalho pré-calculado
-        // ("prefill cache"). Num vídeo real isso fez a transcrição parar no meio de uma frase e pular
-        // 17 s, sempre no mesmo ponto; com "Detectar" (que não usa o atalho) o mesmo vídeo saía
-        // inteiro. Sem o atalho, o idioma continua fixo e custa só alguns milésimos por janela.
-        opcoes.usePrefillCache = false
+        // Com o idioma fixo, o WhisperKit começa cada janela por uma sequência pronta ("prefill"). Num
+        // vídeo real isso fez a transcrição parar no meio de uma frase e pular 17 s, sempre no mesmo
+        // ponto; com "Detectar" (sem o prefill) o mesmo vídeo saía inteiro. Por isso a 1ª passada é
+        // sempre no modo "detectar"; se o modelo achar que é outro idioma, aí sim repete com o idioma fixo.
+        let fixo = opcoes
+        if idioma != nil {
+            opcoes.usePrefillPrompt = false
+            opcoes.detectLanguage = true
+            opcoes.language = nil
+        }
         // o progresso do WhisperKit é um Progress; lido a cada meio segundo
         let acompanhar = Task {
             while !Task.isCancelled {
@@ -150,7 +155,13 @@ actor TranscritorLocal {
                          })
             }
         }
-        let resultados = try await w.transcribe(audioPath: audio.path, decodeOptions: opcoes)
+        var resultados = try await w.transcribe(audioPath: audio.path, decodeOptions: opcoes)
+        if let idioma, let achado = resultados.first?.language, !achado.isEmpty, achado != idioma {
+            // o modelo "detectou" outro idioma: vale o que você escolheu
+            avisar("Transcrevendo no iPhone", nil)
+            resultados = try await w.transcribe(audioPath: audio.path, decodeOptions: fixo)
+            opcoes = fixo
+        }
         let duracao = await AudioUtil.duracao(arquivo)
         var segmentos = Self.arrumar(Self.semInvencoes(converter(resultados).sorted { $0.inicio < $1.inicio },
                                                        duracao: duracao, idioma: idioma))

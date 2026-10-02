@@ -177,8 +177,8 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
   (`clipTimestamps`, sem divisão por pausas) e encaixados. Vale para a legenda e para a transcrição comum.
 - 0.13.3: o buraco de 0:15 a 0:32 só acontecia com o idioma em "Português" (com "Detectar" o mesmo vídeo saía
   inteiro, 3 vezes em 3). Duas diferenças entre os modos, as duas corrigidas, sem saber qual era a culpada:
-  (1) com idioma fixo o WhisperKit usa o "prefill cache" → desligado (`usePrefillCache = false`), e o conserto de
-  buracos passou a transcrever o pedaço no modo "detectar"; (2) o filtro de "outro alfabeto" de `semInvencoes` só
+  (1) com idioma fixo o WhisperKit começa cada janela pelo "prefill" → a 1ª passada agora é sempre no modo
+  "detectar" (só repete com o idioma fixo se o modelo detectar outro idioma), e o conserto de buracos idem; (2) o filtro de "outro alfabeto" de `semInvencoes` só
   roda com idioma fixo → agora só descarta quando a maioria das letras é de outra escrita.
 - 0.13.3: editor de legenda com Desfazer/Refazer (pilha de projetos, mudanças seguidas contam como uma) e
   "Novo bloco em <tempo>" (`ProjetoLegenda.inserirBloco`: texto à mão a partir de onde o vídeo está parado).
