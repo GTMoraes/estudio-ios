@@ -56,6 +56,7 @@ struct VisualizadorImagens: View {
     @State private var atual: Int
     @State private var mostrarInfo = true
     @State private var aviso: String?
+    @State private var confirmar: Confirmacao?
     @Environment(\.dismiss) private var fechar
 
     init(item: Item, inicio: Int) {
@@ -104,12 +105,18 @@ struct VisualizadorImagens: View {
             .alert("Aviso", isPresented: Binding(get: { aviso != nil }, set: { if !$0 { aviso = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: { Text(aviso ?? "") }
+            .confirmar($confirmar)
         }
         .preferredColorScheme(.dark)
         .tint(Tema.acento)
     }
 
     private func salvarNoFotos(_ u: URL) {
+        confirmar = Confirmacao(titulo: "Salvar na galeria do iPhone?", mensagem: "A imagem entra no app Fotos.",
+                                botao: "Salvar", destrutivo: false) { gravarNoFotos(u) }
+    }
+
+    private func gravarNoFotos(_ u: URL) {
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { st in
             guard st == .authorized || st == .limited else {
                 Task { @MainActor in aviso = "Sem permissão para salvar no Fotos (Ajustes › Privacidade › Fotos)." }

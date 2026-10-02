@@ -39,6 +39,7 @@ struct AjustesView: View {
                     }
                     CartaoPreparar()
                     CartaoOriginais()
+                    CartaoArmazenamento()
                     modeloLocalCartao
                     vozCartao
                     Cartao(titulo: "Sobre", icone: "info.circle") {
@@ -460,5 +461,78 @@ struct CartaoOriginais: View {
     private func apagar(_ manter: Int?) {
         estudio.limparOriginais(manterDias: manter)
         espaco = Originais.tamanhoEmDisco()
+    }
+}
+
+/// Os arquivos prontos (Resultados): quanto ocupam, limpeza por idade e os maiores, um a um.
+struct CartaoArmazenamento: View {
+    @Environment(Estudio.self) private var estudio
+    @State private var arquivos: [ArquivoGuardado] = []
+    @State private var confirmar: Confirmacao?
+
+    private var espaco: Int64 { arquivos.reduce(Int64(0)) { $0 + $1.bytes } }
+
+    var body: some View {
+        Cartao(titulo: "Armazenamento", icone: "internaldrive") {
+            Text("Os vídeos, áudios, imagens e textos prontos que estão em Resultados.")
+                .font(.footnote).foregroundStyle(Tema.texto2)
+            HStack {
+                Text("Em uso: \(ByteCountFormatter.string(fromByteCount: espaco, countStyle: .file))").font(.subheadline)
+                Spacer()
+                Menu {
+                    Button("Manter os últimos 7 dias") {
+                        confirmar = Confirmacao(titulo: "Apagar os resultados com mais de 7 dias?",
+                                                mensagem: "Eles saem de Resultados, com todos os arquivos. Isso não pode ser desfeito.") { limpar(7) }
+                    }
+                    Button("Manter os últimos 30 dias") {
+                        confirmar = Confirmacao(titulo: "Apagar os resultados com mais de 30 dias?",
+                                                mensagem: "Eles saem de Resultados, com todos os arquivos. Isso não pode ser desfeito.") { limpar(30) }
+                    }
+                    Button("Apagar tudo", role: .destructive) {
+                        confirmar = Confirmacao(titulo: "Apagar todos os resultados?",
+                                                mensagem: "A aba Resultados fica vazia: vídeos, legendas e transcrições saem do app. Isso não pode ser desfeito.") { limpar(nil) }
+                    }
+                } label: {
+                    Label("Apagar", systemImage: "trash").padding(.horizontal, 12).padding(.vertical, 7)
+                        .background(.white.opacity(0.08), in: .capsule)
+                }
+            }
+            if !arquivos.isEmpty {
+                Text("Maiores arquivos").font(.subheadline.weight(.semibold)).padding(.top, 4)
+                ForEach(Array(arquivos.prefix(15))) { a in
+                    Deslizavel(apagar: {
+                        confirmar = Confirmacao(titulo: "Apagar “\(a.nome)”?",
+                                                mensagem: "O arquivo sai do app. Isso não pode ser desfeito.") {
+                            estudio.apagarArquivoGuardado(a)
+                            withAnimation(.snappy) { atualizar() }
+                        }
+                    }, tocar: {}) {
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(a.nome).font(.subheadline).lineLimit(1).truncationMode(.middle)
+                                Text("\(a.titulo) · \(a.criado.formatted(.dateTime.day().month()))")
+                                    .font(.caption).foregroundStyle(Tema.texto2).lineLimit(1)
+                            }
+                            Spacer(minLength: 0)
+                            Text(ByteCountFormatter.string(fromByteCount: a.bytes, countStyle: .file))
+                                .font(.subheadline.monospacedDigit())
+                        }
+                        .padding(.vertical, 8).padding(.horizontal, 10)
+                        .background(.white.opacity(0.06), in: .rect(cornerRadius: 12))
+                    }
+                }
+                Text("Deslize um arquivo para a esquerda para apagar só ele.")
+                    .font(.caption).foregroundStyle(Tema.texto2)
+            }
+        }
+        .onAppear { atualizar() }
+        .confirmar($confirmar)
+    }
+
+    private func atualizar() { arquivos = estudio.arquivosGuardados() }
+
+    private func limpar(_ manter: Int?) {
+        estudio.limparResultados(manterDias: manter)
+        atualizar()
     }
 }

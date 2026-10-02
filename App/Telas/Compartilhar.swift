@@ -17,6 +17,11 @@ enum Zip {
         try await Task.detached(priority: .userInitiated) { try montar(urls, nome: nome) }.value
     }
 
+    /// O .zip é temporário: sai do aparelho quando a folha de compartilhar fecha.
+    static func limpar() {
+        try? FileManager.default.removeItem(at: FileManager.default.temporaryDirectory.appendingPathComponent("Zips", isDirectory: true))
+    }
+
     private static func montar(_ urls: [URL], nome: String) throws -> URL {
         let fm = FileManager.default
         let raiz = fm.temporaryDirectory.appendingPathComponent("Zips", isDirectory: true)
@@ -76,7 +81,7 @@ struct MenuCompartilhar: View {
         .disabled(compactando)
         .background {
             // a folha fica fora do botão de vidro
-            Color.clear.sheet(item: $zipado) { z in
+            Color.clear.sheet(item: $zipado, onDismiss: { Zip.limpar() }) { z in
                 FolhaCompartilhar(itens: [z.url]).presentationDetents([.medium, .large])
             }
         }

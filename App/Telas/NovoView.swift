@@ -17,41 +17,6 @@ struct NovoView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    Cartao(titulo: "Link do YouTube, Instagram, Drive…", icone: "link") {
-                        HStack(spacing: 10) {
-                            TextField("Cole o link aqui", text: $link)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                                .keyboardType(.URL)
-                                .submitLabel(.go)
-                                .onSubmit(abrirLink)
-                                .padding(12)
-                                .background(.white.opacity(0.06), in: .rect(cornerRadius: 14))
-                            Button {
-                                if let s = UIPasteboard.general.string { link = s.trimmingCharacters(in: .whitespacesAndNewlines) }
-                            } label: {
-                                Image(systemName: "doc.on.clipboard").frame(width: 28, height: 28)
-                            }
-                            .buttonStyle(.glass)
-                        }
-                        BotaoPrincipal(titulo: "Continuar", icone: "arrow.right",
-                                       desativado: link.trimmingCharacters(in: .whitespaces).isEmpty, acao: abrirLink)
-                        Text("Links do Google Drive abrem aqui mesmo, para navegar e escolher o que baixar. Os outros são baixados pela nuvem; o arquivo pronto vem para o iPhone.")
-                            .font(.footnote).foregroundStyle(Tema.texto2)
-                    }
-
-                    if logadoGoogle {
-                        Cartao(titulo: "Google Drive", icone: "externaldrive.fill.badge.icloud") {
-                            VStack(spacing: 10) {
-                                botaoDrive("Compartilhados comigo", "person.2.fill", Drive.compartilhados)
-                                HStack(spacing: 10) {
-                                    botaoDrive("Meu Drive", "externaldrive.fill", Drive.meuDrive)
-                                    botaoDrive("Drives compartilhados", "building.2.fill", Drive.drivesCompartilhados)
-                                }
-                            }
-                        }
-                    }
-
                     Cartao(titulo: "Áudio ou vídeo", icone: "waveform.badge.plus") {
                         GlassEffectContainer(spacing: 12) {
                             HStack(spacing: 12) {
@@ -95,6 +60,41 @@ struct NovoView: View {
                         }
                         Text("Converter para WebP, JPG, HEIC ou PNG, reduzir, cortar e limpar os metadados — uma ou várias de uma vez.")
                             .font(.footnote).foregroundStyle(Tema.texto2)
+                    }
+
+                    Cartao(titulo: "Link do YouTube, Instagram, Drive…", icone: "link") {
+                        HStack(spacing: 10) {
+                            TextField("Cole o link aqui", text: $link)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .keyboardType(.URL)
+                                .submitLabel(.go)
+                                .onSubmit(abrirLink)
+                                .padding(12)
+                                .background(.white.opacity(0.06), in: .rect(cornerRadius: 14))
+                            Button {
+                                if let s = UIPasteboard.general.string { link = s.trimmingCharacters(in: .whitespacesAndNewlines) }
+                            } label: {
+                                Image(systemName: "doc.on.clipboard").frame(width: 28, height: 28)
+                            }
+                            .buttonStyle(.glass)
+                        }
+                        BotaoPrincipal(titulo: "Continuar", icone: "arrow.right",
+                                       desativado: link.trimmingCharacters(in: .whitespaces).isEmpty, acao: abrirLink)
+                        Text("Links do Google Drive abrem aqui mesmo, para navegar e escolher o que baixar. Os outros são baixados pela nuvem; o arquivo pronto vem para o iPhone.")
+                            .font(.footnote).foregroundStyle(Tema.texto2)
+                    }
+
+                    if logadoGoogle {
+                        Cartao(titulo: "Google Drive", icone: "externaldrive.fill.badge.icloud") {
+                            VStack(spacing: 10) {
+                                botaoDrive("Compartilhados comigo", "person.2.fill", Drive.compartilhados)
+                                HStack(spacing: 10) {
+                                    botaoDrive("Meu Drive", "externaldrive.fill", Drive.meuDrive)
+                                    botaoDrive("Drives compartilhados", "building.2.fill", Drive.drivesCompartilhados)
+                                }
+                            }
+                        }
                     }
 
                     Cartao(titulo: "Pelo Compartilhar", icone: "square.and.arrow.up") {

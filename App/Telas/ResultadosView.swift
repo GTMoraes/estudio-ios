@@ -7,6 +7,8 @@ struct ResultadosView: View {
     @Environment(Estudio.self) private var estudio
     @State private var caminho = NavigationPath()
     @State private var confirmar: Confirmacao?
+    /// Linhas que saíram de lado e esperam a resposta do "Apagar?": o lugar delas fica vazio.
+    @State private var saindo: Set<UUID> = []
 
     var body: some View {
         NavigationStack(path: $caminho) {
@@ -18,6 +20,13 @@ struct ResultadosView: View {
                     List {
                         ForEach(estudio.historico.itens) { item in
                             NavigationLink(value: item.id) { LinhaItem(item: item) }
+                                .offset(x: saindo.contains(item.id) ? -700 : 0)
+                                .opacity(saindo.contains(item.id) ? 0 : 1)
+                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                    // sem "role: .destructive": a lista só fecha a linha quando o item sai de verdade
+                                    Button { pedirApagar(item) } label: { Label("Apagar", systemImage: "trash") }
+                                        .tint(.red)
+                                }
                                 .listRowBackground(Color.clear)
                                 .listRowSeparator(.hidden)
                                 .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
@@ -33,17 +42,6 @@ struct ResultadosView: View {
                                         Button("Copiar link", systemImage: "link") { copiarLink(p) }
                                     }
                                 }
-                        }
-                        .onDelete { idx in
-                            let ids = idx.map { estudio.historico.itens[$0].id }
-                            guard !ids.isEmpty else { return }
-                            let nome = ids.count == 1 ? (estudio.historico.item(ids[0])?.titulo ?? "este resultado") : "\(ids.count) resultados"
-                            confirmar = Confirmacao(titulo: "Apagar “\(nome)”?", mensagem: "Os arquivos dele saem do app. Isso não pode ser desfeito.") {
-                                for id in ids {
-                                    estudio.cancelar(id)
-                                    estudio.historico.remover(id)
-                                }
-                            }
                         }
                     }
                     .listStyle(.plain)
@@ -72,6 +70,18 @@ struct ResultadosView: View {
 }
 
 extension ResultadosView {
+    fileprivate func pedirApagar(_ item: Item) {
+        let id = item.id
+        withAnimation(.snappy) { _ = saindo.insert(id) }
+        var c = Confirmacao(titulo: "Apagar “\(item.titulo)”?", mensagem: "Os arquivos dele saem do app. Isso não pode ser desfeito.") {
+            estudio.cancelar(id)
+            withAnimation(.snappy) { estudio.historico.remover(id) }      // a linha de baixo sobe
+            saindo.remove(id)
+        }
+        c.aoCancelar = { withAnimation(.snappy) { _ = saindo.remove(id) } }   // volta para o lugar
+        confirmar = c
+    }
+
     fileprivate func copiarLink(_ p: Drive.Item) {
         UIPasteboard.general.string = p.linkWeb
         estudio.aviso = "Link copiado."
@@ -181,57 +191,6 @@ struct DetalheView: View {
                     if item.estado == .pronto, item.tipo == .legenda {
                         PainelLegendaResultado(item: item, abrirEditor: { editor = EditorAberto(edicao: $0) })
                     }
-                    if item.estado == .pronto, let r = item.reedicao, r.tipo != .legenda {
-                        Cartao {
-                            Button {
-                                buscandoOriginal = true
-                                Task {
-                                    if let motivo = await estudio.editarNovamente(id) { aviso = motivo }
-                                    buscandoOriginal = false
-                                }
-                            } label: {
-                                Label(buscandoOriginal ? "Buscando o original…" : "Editar novamente", systemImage: "slider.horizontal.3")
-                                    .frame(maxWidth: .infinity).padding(.vertical, 4)
-                            }
-                            .buttonStyle(.glass)
-                            .disabled(buscandoOriginal)
-                            Text((r.procedencias ?? []).contains(where: { $0 != nil })
-                                 ? "Busca o original de novo (na galeria, no app Arquivos ou em Resultados) e abre o conversor com os mesmos ajustes. Este resultado continua aqui."
-                                 : "Abre o conversor com a cópia do original guardada no app e os mesmos ajustes. Este resultado continua aqui.")
-                                .font(.caption).foregroundStyle(Tema.texto2)
-                        }
-                    }
-                    if item.estado == .pronto, item.tipo != .drive, item.tipo != .pastaDrive, !item.arquivos.isEmpty {
-                        let todos = item.arquivos.map { item.url($0) }
-                        let midias = todos.filter { ehMidia($0) }
-                        Cartao {
-                            if !midias.isEmpty {
-                                Button { estudio.usarEmNovaTarefa(midias) } label: {
-                                    Label("Usar em nova tarefa", systemImage: "plus.rectangle.on.rectangle")
-                                        .frame(maxWidth: .infinity).padding(.vertical, 4)
-                                }
-                                .buttonStyle(.glass)
-                                Text(midias.count == 1
-                                     ? "Abre este arquivo como se fosse novo: converter, tratar voz, transcrever ou legendar. Este resultado continua aqui."
-                                     : "Abre os \(midias.count) arquivos num lote novo. Para transcrever ou legendar um deles, abra o vídeo e toque em ⋯.")
-                                    .font(.caption).foregroundStyle(Tema.texto2)
-                            }
-                            MenuCompartilhar(urls: todos, nome: item.titulo,
-                                             titulo: todos.count == 1 ? "Compartilhar" : "Compartilhar todos", aviso: $aviso)
-                        }
-                    }
-                    if item.estado == .pronto, item.tipo == .imagem || item.tipo == .video {
-                        Cartao {
-                            if let r = item.resumo, !r.isEmpty {
-                                Label(r, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(.yellow)
-                            }
-                            Button { salvarTodasNoFotos(item) } label: {
-                                Label(item.arquivos.count == 1 ? "Salvar no Fotos" : "Salvar as \(item.arquivos.count) no Fotos",
-                                      systemImage: "photo.badge.plus").frame(maxWidth: .infinity).padding(.vertical, 4)
-                            }
-                            .buttonStyle(.glassProminent)
-                        }
-                    }
                     if item.estado == .pronto, item.tipo == .imagem {
                         Cartao(titulo: item.arquivos.count == 1 ? "Imagem" : "\(item.arquivos.count) imagens", icone: "photo.on.rectangle") {
                             GradeImagens(item: item)
@@ -249,6 +208,47 @@ struct DetalheView: View {
                         if item.tipo == .transcricao, let t = texto {
                             Cartao(titulo: "Texto", icone: "text.quote") {
                                 CaixaTexto(texto: t) { UIPasteboard.general.string = t; aviso = "Texto copiado." }
+                            }
+                        }
+                    }
+                    if item.estado == .pronto, item.tipo == .imagem || item.tipo == .video {
+                        Cartao {
+                            if let r = item.resumo, !r.isEmpty {
+                                Label(r, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(.yellow)
+                            }
+                            Button { salvarTodasNoFotos(item) } label: {
+                                Label(item.arquivos.count == 1 ? "Salvar no Fotos" : "Salvar as \(item.arquivos.count) no Fotos",
+                                      systemImage: "photo.badge.plus").frame(maxWidth: .infinity).padding(.vertical, 4)
+                            }
+                            .buttonStyle(.glassProminent)
+                        }
+                    }
+                    if item.estado == .pronto, item.tipo != .drive, item.tipo != .pastaDrive, !item.arquivos.isEmpty {
+                        let todos = item.arquivos.map { item.url($0) }
+                        let midias = todos.filter { ehMidia($0) }
+                        Cartao {
+                            MenuCompartilhar(urls: todos, nome: item.titulo,
+                                             titulo: todos.count == 1 ? "Compartilhar" : "Compartilhar todos", aviso: $aviso)
+                            if let r = item.reedicao, r.tipo != .legenda {
+                                Button {
+                                    buscandoOriginal = true
+                                    Task {
+                                        if let motivo = await estudio.editarNovamente(id) { aviso = motivo }
+                                        buscandoOriginal = false
+                                    }
+                                } label: {
+                                    Label(buscandoOriginal ? "Buscando o original…" : "Editar novamente", systemImage: "slider.horizontal.3")
+                                        .frame(maxWidth: .infinity).padding(.vertical, 4)
+                                }
+                                .buttonStyle(.glass)
+                                .disabled(buscandoOriginal)
+                            }
+                            if !midias.isEmpty {
+                                Button { estudio.usarEmNovaTarefa(midias) } label: {
+                                    Label("Usar em nova tarefa", systemImage: "plus.rectangle.on.rectangle")
+                                        .frame(maxWidth: .infinity).padding(.vertical, 4)
+                                }
+                                .buttonStyle(.glass)
                             }
                         }
                     }
@@ -298,9 +298,8 @@ struct DetalheView: View {
     private func salvarTodasNoFotos(_ item: Item) {
         let urls = item.arquivos.map { item.url($0) }.filter { ehImagem($0) || ehVideoArquivo($0) }
         guard !urls.isEmpty else { return }
-        guard urls.count > 1 else { gravarNoFotos(urls); return }
-        confirmar = Confirmacao(titulo: "Salvar \(urls.count) arquivos no Fotos?",
-                                mensagem: "Eles entram na galeria do iPhone, um por um.",
+        confirmar = Confirmacao(titulo: urls.count == 1 ? "Salvar na galeria do iPhone?" : "Salvar \(urls.count) arquivos na galeria do iPhone?",
+                                mensagem: urls.count == 1 ? "O arquivo entra no app Fotos." : "Eles entram no app Fotos, um por um.",
                                 botao: "Salvar", destrutivo: false) { gravarNoFotos(urls) }
     }
 
@@ -360,6 +359,7 @@ struct LinhaArquivo: View {
     private var ehAudio: Bool { ["mp3", "m4a", "wav", "aac", "flac"].contains(ext) }
     private var ehFoto: Bool { ["jpg", "jpeg", "png", "heic", "webp", "avif", "gif", "tif", "tiff"].contains(ext) }
     @State private var miniatura: UIImage?
+    @State private var confirmar: Confirmacao?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -413,6 +413,7 @@ struct LinhaArquivo: View {
                 .buttonStyle(.glass)
             }
         }
+        .confirmar($confirmar)
         .onDisappear { player?.pause(); video?.pause(); tocando = false }
         .task {
             if ehFoto, miniatura == nil, let cg = ConversorImagem.miniatura(url, lado: 160) { miniatura = UIImage(cgImage: cg) }
@@ -464,6 +465,11 @@ struct LinhaArquivo: View {
     }
 
     private func salvarNoFotos() {
+        confirmar = Confirmacao(titulo: "Salvar na galeria do iPhone?", mensagem: "O vídeo entra no app Fotos.",
+                                botao: "Salvar", destrutivo: false) { gravarNoFotos() }
+    }
+
+    private func gravarNoFotos() {
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { s in
             guard s == .authorized || s == .limited else {
                 Task { @MainActor in aviso = "Sem permissão para salvar no Fotos (Ajustes › Privacidade › Fotos)." }

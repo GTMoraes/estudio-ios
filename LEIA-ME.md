@@ -201,6 +201,12 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
   este vídeo" na prévia (`editarNovamente(_, so:)`, um vídeo só de um lote). "Compartilhar todos": os arquivos como
   estão ou dentro de um .zip feito pelo iPhone (`Zip` em Compartilhar.swift, sem biblioteca; também para 1 arquivo).
   "Salvar as N no Fotos" pergunta antes.
+- 0.15.1: resultado pronto na ordem: resumo, galeria, "Salvar no Fotos", ações (Compartilhar todos, Editar novamente,
+  Usar em nova tarefa), Apagar. Todo salvar no Fotos pergunta antes, inclusive de um arquivo só. Deslizar para apagar
+  em Resultados: a linha sai de lado e o lugar fica vazio até a resposta (`saindo`; `Confirmacao.aoCancelar` devolve).
+  Download do Drive guarda a pasta de origem (`Item.pastaDrive` também no tipo `.drive`) para "Copiar link".
+  Ajustes › Armazenamento (`CartaoArmazenamento`, `Estudio.arquivosGuardados/limparResultados/apagarArquivoGuardado`).
+  O .zip é apagado quando a folha de compartilhar fecha (`Zip.limpar`). Novo: Áudio/vídeo, Imagens, Link, Drive, Compartilhar.
 - 0.14.0: o seletor de idioma ficou. Sem ele, um vídeo em outra língua seria tratado como português.
 
 ## Correções (0.11.1)

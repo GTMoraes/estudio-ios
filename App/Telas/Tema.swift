@@ -76,6 +76,7 @@ struct Confirmacao: Identifiable {
     var botao = "Apagar"
     var destrutivo = true
     var acao: () -> Void
+    var aoCancelar: (() -> Void)? = nil
 }
 
 extension View {
@@ -85,7 +86,7 @@ extension View {
               presenting: c.wrappedValue) { x in
             if x.destrutivo { Button(x.botao, role: .destructive) { x.acao() } }
             else { Button(x.botao) { x.acao() } }
-            Button("Cancelar", role: .cancel) {}
+            Button("Cancelar", role: .cancel) { x.aoCancelar?() }
         } message: { x in
             Text(x.mensagem)
         }

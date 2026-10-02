@@ -31,6 +31,16 @@ func ehVideoArquivo(_ url: URL) -> Bool {
     UTType(filenameExtension: url.pathExtension)?.conforms(to: .movie) ?? false
 }
 
+/// Um arquivo pronto guardado no app (para a lista de "Maiores arquivos" em Ajustes).
+struct ArquivoGuardado: Identifiable {
+    let item: UUID
+    let nome: String
+    let titulo: String
+    let bytes: Int64
+    let criado: Date
+    var id: String { item.uuidString + "/" + nome }
+}
+
 /// Estado do app e quem executa os trabalhos (no iPhone ou na nuvem).
 @MainActor
 @Observable
@@ -249,6 +259,43 @@ final class Estudio {
             where f.pathExtension.lowercased() != "json" {              // os projetos de legenda ficam
                 try? fm.removeItem(at: f)
             }
+        }
+    }
+
+    // MARK: - armazenamento (os arquivos prontos, em Resultados)
+
+    /// Todos os arquivos dos resultados prontos, do maior para o menor.
+    func arquivosGuardados() -> [ArquivoGuardado] {
+        var lista: [ArquivoGuardado] = []
+        for item in historico.itens where item.estado != .processando {
+            let arquivos = (try? FileManager.default.contentsOfDirectory(at: item.pasta, includingPropertiesForKeys: [.fileSizeKey])) ?? []
+            for u in arquivos {
+                let v = try? u.resourceValues(forKeys: [.fileSizeKey, .isDirectoryKey])
+                if v?.isDirectory == true { continue }
+                lista.append(ArquivoGuardado(item: item.id, nome: u.lastPathComponent, titulo: item.titulo,
+                                             bytes: Int64(v?.fileSize ?? 0), criado: item.criado))
+            }
+        }
+        return lista.sorted { $0.bytes > $1.bytes }
+    }
+
+    /// Apaga um arquivo de um resultado; o resultado sai da lista quando fica sem nenhum.
+    func apagarArquivoGuardado(_ a: ArquivoGuardado) {
+        guard let item = historico.item(a.item) else { return }
+        if let e = (item.edicoes ?? []).first(where: { $0.arquivo == a.nome }) { apagarEdicao(a.item, e) }
+        try? FileManager.default.removeItem(at: item.url(a.nome))
+        historico.atualizar(a.item) { i in i.arquivos.removeAll { $0 == a.nome } }
+        let resto = (try? FileManager.default.contentsOfDirectory(atPath: item.pasta.path)) ?? []
+        if resto.isEmpty { historico.remover(a.item) }
+    }
+
+    /// Apaga resultados inteiros (nil = todos; N = mantém os dos últimos N dias). Os que estão
+    /// processando e os atalhos de pasta do Drive ficam.
+    func limparResultados(manterDias: Int?) {
+        let limite = manterDias.map { Date().addingTimeInterval(-Double($0) * 86400) }
+        for item in historico.itens where item.estado != .processando && item.tipo != .pastaDrive {
+            if let limite, item.criado >= limite { continue }
+            historico.remover(item.id)
         }
     }
 
@@ -988,7 +1035,7 @@ final class Estudio {
         historico.adicionar(n)
     }
 
-    func baixarDrive(_ itens: [Drive.Item], titulo: String, converterDepois: Bool = false) {
+    func baixarDrive(_ itens: [Drive.Item], titulo: String, converterDepois: Bool = false, origem: Drive.Item? = nil) {
         let arquivos = itens.filter { !$0.ehPasta }
         guard !arquivos.isEmpty else { return }
         let id = novoItem(.drive, "Drive: " + titulo, nuvem: false, mensagem: "Baixando do Drive")
@@ -997,7 +1044,7 @@ final class Estudio {
         r.saidas = Array(repeating: nil, count: arquivos.count)
         r.falhas = []
         r.converterDepois = converterDepois
-        historico.atualizar(id) { $0.retomada = r }
+        historico.atualizar(id) { $0.retomada = r; $0.pastaDrive = origem }      // de onde veio: "Copiar link"
         // não há entrada local; a pasta de trabalho só marca que dá para continuar
         try? FileManager.default.createDirectory(at: Trabalhos.entradas(id), withIntermediateDirectories: true)
         executarDrive(id)

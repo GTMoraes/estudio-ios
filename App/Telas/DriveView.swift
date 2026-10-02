@@ -353,7 +353,7 @@ struct PastaDrive: View {
     }
 
     private func baixar(_ lista: [Drive.Item], titulo: String, converter: Bool) {
-        estudio.baixarDrive(lista, titulo: titulo, converterDepois: converter)
+        estudio.baixarDrive(lista, titulo: titulo, converterDepois: converter, origem: pasta.id.hasPrefix("@") ? nil : pasta)
         fechar()
     }
 
@@ -677,6 +677,16 @@ struct PainelResultadoDrive: View {
                 .buttonStyle(.glassProminent).tint(Tema.acento)
                 Button { salvarNoFotos(item) } label: {
                     Label(n == 1 ? "Salvar no Fotos" : "Salvar as \(n) no Fotos", systemImage: "photo.badge.plus")
+                        .frame(maxWidth: .infinity).padding(.vertical, 4)
+                }
+                .buttonStyle(.glass)
+            }
+            if let p = item.pastaDrive {
+                Button {
+                    UIPasteboard.general.string = p.linkWeb
+                    aviso = "Link copiado."
+                } label: {
+                    Label(p.ehPasta ? "Copiar link da pasta" : "Copiar link do arquivo", systemImage: "link")
                         .frame(maxWidth: .infinity).padding(.vertical, 4)
                 }
                 .buttonStyle(.glass)

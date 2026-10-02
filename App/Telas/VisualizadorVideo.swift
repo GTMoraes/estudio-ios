@@ -72,6 +72,7 @@ struct VisualizadorVideos: View {
     @State private var atual: Int
     @State private var mostrarInfo = true
     @State private var aviso: String?
+    @State private var confirmar: Confirmacao?
     @State private var ocupado = false
     @State private var zipado: ArquivoPronto?
     @Environment(\.dismiss) private var fechar
@@ -162,16 +163,22 @@ struct VisualizadorVideos: View {
                     .disabled(ocupado)
                 }
             }
-            .sheet(item: $zipado) { z in FolhaCompartilhar(itens: [z.url]).presentationDetents([.medium, .large]) }
+            .sheet(item: $zipado, onDismiss: { Zip.limpar() }) { z in FolhaCompartilhar(itens: [z.url]).presentationDetents([.medium, .large]) }
             .alert("Aviso", isPresented: Binding(get: { aviso != nil }, set: { if !$0 { aviso = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: { Text(aviso ?? "") }
+            .confirmar($confirmar)
         }
         .preferredColorScheme(.dark)
         .tint(Tema.acento)
     }
 
     private func salvarNoFotos(_ u: URL) {
+        confirmar = Confirmacao(titulo: "Salvar na galeria do iPhone?", mensagem: "O vídeo entra no app Fotos.",
+                                botao: "Salvar", destrutivo: false) { gravarNoFotos(u) }
+    }
+
+    private func gravarNoFotos(_ u: URL) {
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { st in
             guard st == .authorized || st == .limited else {
                 Task { @MainActor in aviso = "Sem permissão para salvar no Fotos (Ajustes › Privacidade › Fotos)." }
