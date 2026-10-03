@@ -202,11 +202,13 @@ struct DetalheView: View {
                         Cartao {
                             Label("O iPhone não abre este vídeo (formato \(formato)).", systemImage: "exclamationmark.triangle.fill")
                                 .font(.subheadline.weight(.semibold)).foregroundStyle(.yellow)
-                            Text("Dá para compartilhar o arquivo como está, ou converter para um formato que o iPhone abre. A conversão troca este arquivo e perde um pouco de qualidade. Deixe o Estúdio aberto enquanto ela roda.")
+                            Text("Não feche o Estúdio enquanto a conversão acontece.")
                                 .font(.footnote).foregroundStyle(Tema.texto2)
                             Menu {
-                                Button("HEVC (recomendado)") { pedirConversao(.hevc, "HEVC") }
-                                Button("H.264 (mais compatível, arquivo maior)") { pedirConversao(.h264, "H.264") }
+                                Button("HEVC · qualidade máxima (arquivo ~2× maior)") { pedirConversao(.hevc, .maxima, "HEVC") }
+                                Button("HEVC · equilibrado (~1,4× maior)") { pedirConversao(.hevc, .equilibrada, "HEVC") }
+                                Button("HEVC · mesmo tamanho do original") { pedirConversao(.hevc, .mesmoTamanho, "HEVC") }
+                                Button("H.264 · mais compatível (~2,6× maior)") { pedirConversao(.h264, .maxima, "H.264") }
                                 if item.pedidoLink != nil {
                                     Divider()
                                     Button("Pela nuvem, em HEVC") { pedirConversaoNaNuvem() }
@@ -335,15 +337,15 @@ struct DetalheView: View {
         }
     }
 
-    private func pedirConversao(_ codec: ConversorCompat.Codec, _ nome: String) {
+    private func pedirConversao(_ codec: ConversorCompat.Codec, _ qualidade: ConversorCompat.Qualidade, _ nome: String) {
         confirmar = Confirmacao(titulo: "Converter para \(nome)?",
-                                mensagem: "A conversão roda no iPhone e o vídeo convertido entra no lugar deste. Se algo falhar, o original continua aqui.",
-                                botao: "Converter", destrutivo: false) { estudio.converterNoIPhone(id, codec: codec) }
+                                mensagem: "O vídeo convertido entra no lugar deste. Não feche o Estúdio enquanto a conversão acontece.",
+                                botao: "Converter", destrutivo: false) { estudio.converterNoIPhone(id, codec: codec, qualidade: qualidade) }
     }
 
     private func pedirConversaoNaNuvem() {
         confirmar = Confirmacao(titulo: "Converter pela nuvem?",
-                                mensagem: "A nuvem baixa o link de novo, converte e entrega no lugar deste arquivo. Se algo falhar, o original continua aqui.",
+                                mensagem: "O vídeo convertido entra no lugar deste.",
                                 botao: "Converter", destrutivo: false) { estudio.converterPelaNuvem(id, codec: "hevc") }
     }
 

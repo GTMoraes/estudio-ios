@@ -9,16 +9,22 @@ import CoreVideo
 enum ConversorCompat {
     enum Codec: String { case hevc, h264 }
 
+    /// Quanto de taxa o vídeo convertido recebe em relação ao original. Regravar sempre perde um pouco;
+    /// mais taxa esconde melhor a perda, ao custo de um arquivo maior.
+    enum Qualidade: Double {
+        case maxima = 2.0, equilibrada = 1.4, mesmoTamanho = 1.0
+    }
+
     private final class Sinal: @unchecked Sendable { var cancelado = false }
 
-    static func converter(_ origem: URL, para destino: URL, codec: Codec,
+    static func converter(_ origem: URL, para destino: URL, codec: Codec, qualidade: Qualidade = .maxima,
                           progresso: @escaping @Sendable (Double) -> Void) async throws {
         let sinal = Sinal()
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
                 DispatchQueue.global(qos: .userInitiated).async {
                     do {
-                        try executar(origem, destino, codec, sinal, progresso)
+                        try executar(origem, destino, codec, qualidade, sinal, progresso)
                         c.resume()
                     } catch {
                         try? FileManager.default.removeItem(at: destino)
@@ -31,7 +37,7 @@ enum ConversorCompat {
         }
     }
 
-    private static func executar(_ origem: URL, _ destino: URL, _ codec: Codec, _ sinal: Sinal,
+    private static func executar(_ origem: URL, _ destino: URL, _ codec: Codec, _ qualidade: Qualidade, _ sinal: Sinal,
                                  _ progresso: @escaping @Sendable (Double) -> Void) throws {
         var info = EstudioInfo()
         var motivo = [CChar](repeating: 0, count: 256)
@@ -44,11 +50,15 @@ enum ConversorCompat {
         let dez = info.dezBits == 1 && codec == .hevc          // H.264 do iPhone é só 8 bits
         let largura = Int(info.largura), altura = Int(info.altura)
         let fps = info.fps > 1 ? min(info.fps, 120) : 30
-        // taxa folgada para a regravação não aparecer: o dobro da original, com um piso pelo tamanho da imagem
+        // taxa em relação à original (o H.264 precisa de ~30% a mais para o mesmo resultado). O piso pelo
+        // tamanho da imagem só vale quando a taxa original é desconhecida ou na qualidade máxima.
         let pixels = Double(largura * altura)
         let piso = pixels * fps * (codec == .hevc ? 0.07 : 0.11)
-        let alvo = Double(info.taxaVideo) * (codec == .hevc ? 2.0 : 2.6)
-        let taxa = Int(min(80_000_000, max(piso, alvo)))
+        let alvo = Double(info.taxaVideo) * qualidade.rawValue * (codec == .hevc ? 1.0 : 1.3)
+        let taxa: Int
+        if info.taxaVideo <= 0 { taxa = Int(min(80_000_000, piso)) }
+        else if qualidade == .maxima { taxa = Int(min(80_000_000, max(piso, alvo))) }
+        else { taxa = Int(min(80_000_000, max(200_000, alvo))) }
 
         try? FileManager.default.removeItem(at: destino)
         let escritor = try AVAssetWriter(outputURL: destino, fileType: .mp4)
@@ -96,7 +106,9 @@ enum ConversorCompat {
                 AVFormatIDKey: kAudioFormatMPEG4AAC,
                 AVSampleRateKey: min(48_000, Int(info.taxaAudio)),
                 AVNumberOfChannelsKey: Int(info.canais),
-                AVEncoderBitRateKey: info.canais >= 2 ? 192_000 : 96_000,
+                // 1,5× a taxa do áudio original (entre 64 e 192 kb/s); sem saber a original, 160 kb/s
+                AVEncoderBitRateKey: (info.taxaBitsAudio > 0 ? min(192_000, max(64_000, Int(Double(info.taxaBitsAudio) * 1.5))) : 160_000)
+                    / (info.canais >= 2 ? 1 : 2),
             ]
             let a = AVAssetWriterInput(mediaType: .audio, outputSettings: ajustesAudio, sourceFormatHint: f.formatDescription)
             a.expectsMediaDataInRealTime = false

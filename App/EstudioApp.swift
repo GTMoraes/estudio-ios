@@ -70,8 +70,10 @@ struct AvisoProcessando: View {
     @Environment(Estudio.self) private var estudio
 
     private var soImagens: Bool {
-        estudio.historico.itens.filter { !$0.naNuvem && $0.estado == .processando && estudio.rodando($0.id) }
-            .allSatisfy { $0.tipo == .imagem }
+        let ativos = estudio.historico.itens.filter {
+            (!$0.naNuvem || $0.convertendoLocal == true) && $0.estado == .processando && estudio.rodando($0.id)
+        }
+        return !ativos.isEmpty && ativos.allSatisfy { $0.tipo == .imagem }
     }
 
     var body: some View {

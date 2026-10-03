@@ -1247,7 +1247,7 @@ final class Estudio {
     /// Vídeo que o iPhone não abre (qualquer origem): o FFmpeg embutido decodifica e o iPhone grava em
     /// HEVC ou H.264. Cada arquivo incompatível do resultado é trocado pelo convertido; se falhar ou
     /// for cancelado, o original continua lá.
-    func converterNoIPhone(_ id: UUID, codec: ConversorCompat.Codec) {
+    func converterNoIPhone(_ id: UUID, codec: ConversorCompat.Codec, qualidade: ConversorCompat.Qualidade = .maxima) {
         guard tarefas[id] == nil, let item = historico.item(id), item.estado == .pronto else { return }
         historico.atualizar(id) {
             $0.estado = .processando; $0.mensagem = "Na fila do iPhone"; $0.progresso = nil; $0.convertendoLocal = true
@@ -1269,7 +1269,7 @@ final class Estudio {
                     self.etapa(id, rotulo, 0)
                     let origem = item.url(nome)
                     let tmp = Self.pastaRecebidos.appendingPathComponent(UUID().uuidString + ".mp4")
-                    try await ConversorCompat.converter(origem, para: tmp, codec: codec) { p in
+                    try await ConversorCompat.converter(origem, para: tmp, codec: codec, qualidade: qualidade) { p in
                         Task { @MainActor in self.etapa(id, rotulo, p) }
                     }
                     if let formato = await Compatibilidade.problema(tmp) {

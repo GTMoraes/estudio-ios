@@ -27,6 +27,7 @@ typedef struct {
     int temVideo, temAudio;
     int taxaAudio;              // Hz
     int canais;                 // 1 ou 2 (mais que isso é reduzido para estéreo)
+    int64_t taxaBitsAudio;      // bits/s do áudio original; 0 = desconhecida
     char codecVideo[32];
     char codecAudio[32];
 } EstudioInfo;

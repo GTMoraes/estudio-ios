@@ -149,6 +149,7 @@ EstudioLeitor *estudio_abrir(const char *caminho, EstudioInfo *info, char *erro,
         }
         if (l->ai >= 0) {
             info->taxaAudio = l->taxa; info->canais = l->canais;
+            info->taxaBitsAudio = l->fmt->streams[l->ai]->codecpar->bit_rate > 0 ? l->fmt->streams[l->ai]->codecpar->bit_rate : 0;
             snprintf(info->codecAudio, sizeof info->codecAudio, "%s", avcodec_get_name(l->fmt->streams[l->ai]->codecpar->codec_id));
         }
     }

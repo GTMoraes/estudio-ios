@@ -224,6 +224,9 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
   (qualquer origem); a nuvem continua como opção no menu para o que veio de link. Vídeo incompatível escolhido em Novo,
   Compartilhar ou "Abrir com" não vai mais ao conversor (falhava): é guardado em Resultados com o botão de converter.
   Testado fora do iPhone: a decodificação do `VideoBugado` (VP9, 14.576 quadros) saiu idêntica à do ffmpeg, vídeo e áudio.
+- 0.17.2: conversão local com escolha de qualidade (`ConversorCompat.Qualidade`: taxa de 2×, 1,4× ou 1× a original; a 0.17.1
+  usava sempre 2×, por isso o HEVC saía com o dobro do tamanho do VP9). Áudio a 1,5× a taxa original (64 a 192 kb/s) em
+  vez de 192 kb/s fixos. Faixa de aviso do app: não diz mais "Convertendo imagens" durante a conversão de vídeo.
 - 0.14.0: o seletor de idioma ficou. Sem ele, um vídeo em outra língua seria tratado como português.
 
 ## Correções (0.11.1)
