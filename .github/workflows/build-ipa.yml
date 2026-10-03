@@ -38,6 +38,15 @@ jobs:
           done
           echo "codificadores OK"
 
+      - name: Cache do FFmpeg (leitura e decodificação de qualquer formato)
+        uses: actions/cache@v4
+        with:
+          path: vendor-ff
+          key: ffmpeg-${{ hashFiles('scripts/compilar-ffmpeg.sh') }}
+
+      - name: Compilar o FFmpeg para iPhone
+        run: bash scripts/compilar-ffmpeg.sh
+
       - name: Gerar o projeto (XcodeGen)
         run: |
           brew install xcodegen
