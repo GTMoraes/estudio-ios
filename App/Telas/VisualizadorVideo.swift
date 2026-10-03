@@ -74,6 +74,8 @@ struct VisualizadorVideos: View {
     @State private var aviso: String?
     @State private var confirmar: Confirmacao?
     @State private var ocupado = false
+    /// Formato que o iPhone não abre (nil = abre): some o salvar no Fotos e o que depende de ler o vídeo.
+    @State private var problema: String?
     @State private var zipado: ArquivoPronto?
     @Environment(\.dismiss) private var fechar
     @Environment(Estudio.self) private var estudio
@@ -144,18 +146,22 @@ struct VisualizadorVideos: View {
                     Button { withAnimation(.snappy) { mostrarInfo.toggle() } } label: {
                         Image(systemName: mostrarInfo ? "info.circle.fill" : "info.circle")
                     }
-                    Spacer()
-                    Button { salvarNoFotos(urlAtual) } label: { Image(systemName: "photo.badge.plus") }
+                    if problema == nil {
+                        Spacer()
+                        Button { salvarNoFotos(urlAtual) } label: { Image(systemName: "photo.badge.plus") }
+                    }
                     Spacer()
                     Menu {
-                        if let k = indiceEdicao {
+                        if problema == nil, let k = indiceEdicao {
                             Button { editarEste(k) } label: { Label("Editar novamente este vídeo", systemImage: "slider.horizontal.3") }
                         }
-                        Button {
-                            let u = urlAtual
-                            fechar()
-                            estudio.usarEmNovaTarefa([u], espera: 0.6)
-                        } label: { Label("Usar em nova tarefa", systemImage: "plus.rectangle.on.rectangle") }
+                        if problema == nil {
+                            Button {
+                                let u = urlAtual
+                                fechar()
+                                estudio.usarEmNovaTarefa([u], espera: 0.6)
+                            } label: { Label("Usar em nova tarefa", systemImage: "plus.rectangle.on.rectangle") }
+                        }
                         Button { compactar() } label: { Label("Compartilhar como .zip", systemImage: "doc.zipper") }
                     } label: {
                         Image(systemName: ocupado ? "hourglass" : "ellipsis.circle")
@@ -168,6 +174,7 @@ struct VisualizadorVideos: View {
                 Button("OK", role: .cancel) {}
             } message: { Text(aviso ?? "") }
             .confirmar($confirmar)
+            .task(id: atual) { problema = await Compatibilidade.problema(urlAtual) }
         }
         .preferredColorScheme(.dark)
         .tint(Tema.acento)

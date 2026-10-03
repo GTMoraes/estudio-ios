@@ -145,9 +145,11 @@ final class Nuvem: @unchecked Sendable {
     }
 
     /// modo: "video", "audio" ou "transcribe"
-    func iniciarLink(_ link: String, modo: String, idioma: String, titulo: String) async throws -> String {
-        let r = try await objeto("api/link/start", metodo: "POST",
-                                 json: ["url": link, "mode": modo, "language": idioma, "title": titulo])
+    /// compat: "hevc" ou "h264" = se o vídeo vier num formato que o iPhone não abre, a nuvem converte antes de entregar.
+    func iniciarLink(_ link: String, modo: String, idioma: String, titulo: String, compat: String? = nil) async throws -> String {
+        var corpo: [String: Any] = ["url": link, "mode": modo, "language": idioma, "title": titulo]
+        if let compat { corpo["compat"] = compat }
+        let r = try await objeto("api/link/start", metodo: "POST", json: corpo)
         guard let j = r["job_id"] as? String else { throw ErroApp("A nuvem não iniciou o download.") }
         return j
     }

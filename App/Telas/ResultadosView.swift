@@ -32,14 +32,14 @@ struct ResultadosView: View {
                                 .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                                 .swipeActions(edge: .leading) {
                                     // pasta do Drive: arrastar para a direita copia o link
-                                    if let p = item.pastaDrive {
-                                        Button { copiarLink(p) } label: { Label("Copiar link", systemImage: "link") }
+                                    if let l = item.linkDeOrigem {
+                                        Button { copiarLink(l) } label: { Label("Copiar link", systemImage: "link") }
                                             .tint(Tema.acento)
                                     }
                                 }
                                 .contextMenu {
-                                    if let p = item.pastaDrive {
-                                        Button("Copiar link", systemImage: "link") { copiarLink(p) }
+                                    if let l = item.linkDeOrigem {
+                                        Button("Copiar link", systemImage: "link") { copiarLink(l) }
                                     }
                                 }
                         }
@@ -82,10 +82,15 @@ extension ResultadosView {
         confirmar = c
     }
 
-    fileprivate func copiarLink(_ p: Drive.Item) {
-        UIPasteboard.general.string = p.linkWeb
+    fileprivate func copiarLink(_ l: String) {
+        UIPasteboard.general.string = l
         estudio.aviso = "Link copiado."
     }
+}
+
+extension Item {
+    /// De onde veio: a pasta do Drive ou o link (YouTube, Instagram…) que foi baixado.
+    var linkDeOrigem: String? { pastaDrive?.linkWeb ?? pedidoLink?.info.link }
 }
 
 struct LinhaItem: View {
@@ -143,6 +148,8 @@ struct DetalheView: View {
         let edicao: UUID?            // nil = o projeto em andamento; senão, a versão de uma edição gravada
     }
     @State private var buscandoOriginal = false
+    /// Formato do vídeo que o iPhone não abre (ex.: "VP9"); nil = abre normalmente.
+    @State private var incompativel: String?
     @State private var confirmar: Confirmacao?
 
     var body: some View {
@@ -191,13 +198,33 @@ struct DetalheView: View {
                     if item.estado == .pronto, item.tipo == .legenda {
                         PainelLegendaResultado(item: item, abrirEditor: { editor = EditorAberto(edicao: $0) })
                     }
+                    if item.estado == .pronto, let formato = incompativel {
+                        Cartao {
+                            Label("O iPhone não abre este vídeo (formato \(formato)).", systemImage: "exclamationmark.triangle.fill")
+                                .font(.subheadline.weight(.semibold)).foregroundStyle(.yellow)
+                            Text("Dá para compartilhar o arquivo como está, ou converter para um formato que o iPhone abre. A conversão troca este arquivo e perde um pouco de qualidade. Deixe o Estúdio aberto enquanto ela roda.")
+                                .font(.footnote).foregroundStyle(Tema.texto2)
+                            Menu {
+                                Button("HEVC (recomendado)") { pedirConversao(.hevc, "HEVC") }
+                                Button("H.264 (mais compatível, arquivo maior)") { pedirConversao(.h264, "H.264") }
+                                if item.pedidoLink != nil {
+                                    Divider()
+                                    Button("Pela nuvem, em HEVC") { pedirConversaoNaNuvem() }
+                                }
+                            } label: {
+                                Label("Converter para o iPhone", systemImage: "arrow.triangle.2.circlepath")
+                                    .frame(maxWidth: .infinity).padding(.vertical, 4)
+                            }
+                            .buttonStyle(.glassProminent)
+                        }
+                    }
                     if item.estado == .pronto, item.tipo == .imagem {
                         Cartao(titulo: item.arquivos.count == 1 ? "Imagem" : "\(item.arquivos.count) imagens", icone: "photo.on.rectangle") {
                             GradeImagens(item: item)
                         }
                     } else if item.estado == .pronto, item.tipo == .video {
                         Cartao(titulo: item.arquivos.count == 1 ? "Vídeo" : "\(item.arquivos.count) vídeos", icone: "film.stack") {
-                            GradeVideos(item: item)
+                            GradeVideos(item: item).id(item.estado)      // arquivo trocado (conversão): refaz as miniaturas
                         }
                     } else if item.estado == .pronto, item.tipo != .drive {
                         Cartao(titulo: "Arquivos", icone: "folder.fill") {
@@ -211,7 +238,7 @@ struct DetalheView: View {
                             }
                         }
                     }
-                    if item.estado == .pronto, item.tipo == .imagem || item.tipo == .video {
+                    if item.estado == .pronto, incompativel == nil, item.tipo == .imagem || item.tipo == .video {
                         Cartao {
                             if let r = item.resumo, !r.isEmpty {
                                 Label(r, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(.yellow)
@@ -229,7 +256,7 @@ struct DetalheView: View {
                         Cartao {
                             MenuCompartilhar(urls: todos, nome: item.titulo,
                                              titulo: todos.count == 1 ? "Compartilhar" : "Compartilhar todos", aviso: $aviso)
-                            if let r = item.reedicao, r.tipo != .legenda {
+                            if incompativel == nil, let r = item.reedicao, r.tipo != .legenda {
                                 Button {
                                     buscandoOriginal = true
                                     Task {
@@ -243,9 +270,19 @@ struct DetalheView: View {
                                 .buttonStyle(.glass)
                                 .disabled(buscandoOriginal)
                             }
-                            if !midias.isEmpty {
+                            if !midias.isEmpty, incompativel == nil {
                                 Button { estudio.usarEmNovaTarefa(midias) } label: {
                                     Label("Usar em nova tarefa", systemImage: "plus.rectangle.on.rectangle")
+                                        .frame(maxWidth: .infinity).padding(.vertical, 4)
+                                }
+                                .buttonStyle(.glass)
+                            }
+                            if let l = item.pedidoLink?.info.link {
+                                Button {
+                                    UIPasteboard.general.string = l
+                                    aviso = "Link copiado."
+                                } label: {
+                                    Label("Copiar link de origem", systemImage: "link")
                                         .frame(maxWidth: .infinity).padding(.vertical, 4)
                                 }
                                 .buttonStyle(.glass)
@@ -270,6 +307,15 @@ struct DetalheView: View {
             .telaEscura()
             .navigationTitle(tituloTipo(item.tipo))
             .navigationBarTitleDisplayMode(.inline)
+            .task(id: item.estado.rawValue + "|" + item.arquivos.joined(separator: "|")) {
+                var achado: String?
+                if item.estado == .pronto {
+                    for n in item.arquivos {
+                        if let f = await Compatibilidade.problema(item.url(n)) { achado = f; break }
+                    }
+                }
+                incompativel = achado
+            }
             .task(id: item.estado) {
                 if item.tipo == .transcricao, item.estado == .pronto,
                    let txt = item.arquivos.first(where: { $0.hasSuffix(".txt") }) {
@@ -287,6 +333,18 @@ struct DetalheView: View {
         } else {
             ContentUnavailableView("Item apagado", systemImage: "trash").telaEscura()
         }
+    }
+
+    private func pedirConversao(_ codec: ConversorCompat.Codec, _ nome: String) {
+        confirmar = Confirmacao(titulo: "Converter para \(nome)?",
+                                mensagem: "A conversão roda no iPhone e o vídeo convertido entra no lugar deste. Se algo falhar, o original continua aqui.",
+                                botao: "Converter", destrutivo: false) { estudio.converterNoIPhone(id, codec: codec) }
+    }
+
+    private func pedirConversaoNaNuvem() {
+        confirmar = Confirmacao(titulo: "Converter pela nuvem?",
+                                mensagem: "A nuvem baixa o link de novo, converte e entrega no lugar deste arquivo. Se algo falhar, o original continua aqui.",
+                                botao: "Converter", destrutivo: false) { estudio.converterPelaNuvem(id, codec: "hevc") }
     }
 
     private func abrirSePedido() {

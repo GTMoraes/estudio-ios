@@ -217,6 +217,13 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
   (LGPL, só leitura e decodificação: sem codificadores, muxers, rede ou programas), com cache próprio no Actions.
   Ponte em `App/Codificadores/Decodificador.{h,c}`; Ajustes › Sobre mostra a versão e se há VP9/AV1. Ainda não muda
   nada no uso: a conversão local ("Converter para o iPhone" sem nuvem) vem na 0.17.1.
+- 0.17.1: **"Converter para o iPhone" local.** `Decodificador.c` ganhou um leitor (`estudio_abrir/proximo/copiar_video/
+  copiar_audio/fechar`): o FFmpeg abre e decodifica; o vídeo sai em NV12 (ou P010 se a fonte tem 10 bits) e o áudio em
+  float intercalado. `ConversorCompat` grava com o AVAssetWriter em HEVC (padrão) ou H.264, taxa = 2× a original com
+  piso pelo tamanho, cor e rotação preservadas. `Estudio.converterNoIPhone` troca os arquivos incompatíveis do resultado
+  (qualquer origem); a nuvem continua como opção no menu para o que veio de link. Vídeo incompatível escolhido em Novo,
+  Compartilhar ou "Abrir com" não vai mais ao conversor (falhava): é guardado em Resultados com o botão de converter.
+  Testado fora do iPhone: a decodificação do `VideoBugado` (VP9, 14.576 quadros) saiu idêntica à do ffmpeg, vídeo e áudio.
 - 0.14.0: o seletor de idioma ficou. Sem ele, um vídeo em outra língua seria tratado como português.
 
 ## Correções (0.11.1)

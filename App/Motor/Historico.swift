@@ -27,6 +27,7 @@ struct Item: Codable, Identifiable, Equatable {
     var pedidoLink: PedidoLink?            // link: o pedido original, para "Tentar de novo"
     var pastaDrive: Drive.Item?            // pasta (ou arquivo) do Drive aberta antes: acesso rápido
     var reedicao: Retomada?                // conversão pronta: os ajustes usados; o original fica em Originais/<id>
+    var convertendoLocal: Bool?            // "Converter para o iPhone" rodando no aparelho (se o app fechar, o item volta a pronto)
     var edicoes: [EdicaoLegenda]?          // legenda: vídeos já gravados com legenda (o mais novo primeiro)
 
     var pasta: URL { Historico.pastaResultados.appendingPathComponent(id.uuidString, isDirectory: true) }

@@ -112,9 +112,38 @@ final class Estudio {
     }
 
     /// Um áudio/vídeo abre o conversor normal; vários viram um lote.
+    /// Vídeo num formato que o iPhone não abre (VP9, WebM, MKV…) não vai para o conversor, que
+    /// falharia: é guardado em Resultados, onde há o botão "Converter para o iPhone".
     private func receberMidias(_ m: [(URL, String)]) {
-        if m.count == 1 { receber(.arquivo(m[0].0, nome: m[0].1)) }
-        else if m.count > 1 { receber(.videos(m.map { $0.0 })) }
+        guard !m.isEmpty else { return }
+        Task { @MainActor in
+            var boas: [(URL, String)] = []
+            for par in m {
+                if let formato = await Compatibilidade.problema(par.0) {
+                    self.guardarIncompativel(par.0, nome: par.1, formato: formato)
+                } else {
+                    boas.append(par)
+                }
+            }
+            if boas.count == 1 { self.receber(.arquivo(boas[0].0, nome: boas[0].1)) }
+            else if boas.count > 1 { self.receber(.videos(boas.map { $0.0 })) }
+        }
+    }
+
+    private func guardarIncompativel(_ u: URL, nome: String, formato: String) {
+        let id = novoItem(.video, nome, nuvem: false, mensagem: "Guardando")
+        guard let item = historico.item(id) else { return }
+        do {
+            try FileManager.default.createDirectory(at: item.pasta, withIntermediateDirectories: true)
+            let destino = Nuvem.semColisao(item.url(Nuvem.limpar(nome)))
+            try FileManager.default.moveItem(at: u, to: destino)
+            procedencias[u.path] = nil
+            concluir(id, arquivos: [destino.lastPathComponent], inicio: Date())
+            aviso = "“\(nome)” está em \(formato), que o iPhone não abre. Ele foi guardado em Resultados: abra e toque em “Converter para o iPhone”."
+        } catch {
+            historico.remover(id)
+            aviso = "Não consegui guardar \(nome): \(error.localizedDescription)"
+        }
     }
 
     /// estudio://caixa (vindo da extensão) ou arquivo aberto com "Abrir com".
@@ -125,7 +154,8 @@ final class Estudio {
         defer { if acesso { url.stopAccessingSecurityScopedResource() } }
         let destino = Nuvem.semColisao(Self.pastaRecebidos.appendingPathComponent(url.lastPathComponent))
         if (try? FileManager.default.copyItem(at: url, to: destino)) != nil {
-            receber(ehImagem(destino) ? .imagens([destino]) : .arquivo(destino, nome: url.lastPathComponent))
+            if ehImagem(destino) { receber(.imagens([destino])) }
+            else { receberMidias([(destino, url.lastPathComponent)]) }
         }
         // "Abrir com" deixa uma cópia em Documentos/Inbox (visível no app Arquivos): apaga
         if url.path.contains("/Documents/Inbox/") { try? FileManager.default.removeItem(at: url) }
@@ -490,7 +520,7 @@ final class Estudio {
 
     /// Há trabalho rodando no iPhone (mostra o aviso para não sair do app).
     var processandoLocal: Bool {
-        historico.itens.contains { !$0.naNuvem && $0.estado == .processando && tarefas[$0.id] != nil }
+        historico.itens.contains { (!$0.naNuvem || $0.convertendoLocal == true) && $0.estado == .processando && tarefas[$0.id] != nil }
     }
 
     /// Tela sempre acesa enquanto houver trabalho no iPhone (fora da tela o iOS pausa o app).
@@ -1214,6 +1244,97 @@ final class Estudio {
         }
     }
 
+    /// Vídeo que o iPhone não abre (qualquer origem): o FFmpeg embutido decodifica e o iPhone grava em
+    /// HEVC ou H.264. Cada arquivo incompatível do resultado é trocado pelo convertido; se falhar ou
+    /// for cancelado, o original continua lá.
+    func converterNoIPhone(_ id: UUID, codec: ConversorCompat.Codec) {
+        guard tarefas[id] == nil, let item = historico.item(id), item.estado == .pronto else { return }
+        historico.atualizar(id) {
+            $0.estado = .processando; $0.mensagem = "Na fila do iPhone"; $0.progresso = nil; $0.convertendoLocal = true
+        }
+        atualizarTela()
+        rodar(id) {
+            do {
+                try await self.aguardarVez(id)
+                let nomes = self.historico.item(id)?.arquivos ?? []
+                var alvos: [String] = []
+                for n in nomes {
+                    let problema = await Compatibilidade.problema(item.url(n))
+                    if problema != nil { alvos.append(n) }
+                }
+                if alvos.isEmpty { throw ErroApp("Não há vídeo para converter neste resultado.") }
+                for (k, nome) in alvos.enumerated() {
+                    try Task.checkCancellation()
+                    let rotulo = alvos.count == 1 ? "Convertendo no iPhone" : "Convertendo no iPhone (\(k + 1) de \(alvos.count))"
+                    self.etapa(id, rotulo, 0)
+                    let origem = item.url(nome)
+                    let tmp = Self.pastaRecebidos.appendingPathComponent(UUID().uuidString + ".mp4")
+                    try await ConversorCompat.converter(origem, para: tmp, codec: codec) { p in
+                        Task { @MainActor in self.etapa(id, rotulo, p) }
+                    }
+                    if let formato = await Compatibilidade.problema(tmp) {
+                        try? FileManager.default.removeItem(at: tmp)
+                        throw ErroApp("O vídeo convertido saiu em \(formato), que o iPhone também não abre.")
+                    }
+                    // troca: o original sai e o convertido entra com o mesmo nome (em .mp4)
+                    try FileManager.default.removeItem(at: origem)
+                    let base = origem.deletingPathExtension().lastPathComponent
+                    let destino = Nuvem.semColisao(item.url(base + ".mp4"))
+                    try FileManager.default.moveItem(at: tmp, to: destino)
+                    let novo = destino.lastPathComponent
+                    self.historico.atualizar(id) { i in
+                        i.arquivos = i.arquivos.map { $0 == nome ? novo : $0 }
+                        if novo != nome, let o = i.origensMidia?[nome] { i.origensMidia?[novo] = o; i.origensMidia?[nome] = nil }
+                    }
+                }
+            } catch {
+                if !(error is CancellationError) {
+                    self.aviso = "Não consegui converter: " + ((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+                }
+            }
+            self.historico.atualizar(id) { $0.estado = .pronto; $0.mensagem = nil; $0.progresso = nil; $0.convertendoLocal = nil }
+        }
+    }
+
+    /// Vídeo de link que o iPhone não abre: pede o mesmo link à nuvem de novo, agora convertido
+    /// (codec: "hevc" ou "h264"), e troca o arquivo do resultado. Se falhar, o original continua lá.
+    func converterPelaNuvem(_ id: UUID, codec: String) {
+        guard tarefas[id] == nil, let item = historico.item(id), item.estado == .pronto,
+              let p = item.pedidoLink else { return }
+        let antigos = item.arquivos
+        let base = item.baseSaida ?? PadraoNome.base(p.info.titulo, padrao: p.padrao, data: item.criado)
+        let inicio = Date()
+        historico.atualizar(id) { $0.estado = .processando; $0.mensagem = "Pedindo a conversão à nuvem"; $0.progresso = nil }
+        rodar(id, segundoPlano: "Convertendo vídeo na nuvem") {
+            do {
+                let job = try await self.nuvem.iniciarLink(p.info.link, modo: "video", idioma: p.idioma, titulo: p.info.titulo, compat: codec)
+                self.historico.atualizar(id) { $0.trabalho = job }      // app fechado no meio: retoma ao abrir
+                let r = try await self.nuvem.aguardar(job) { m in
+                    Task { @MainActor in self.etapa(id, m == "Processando na nuvem" ? "Convertendo na nuvem (pode demorar)" : m) }
+                }
+                guard let tid = r["id"] as? Int else { throw ErroApp("Resposta incompleta da nuvem.") }
+                let novo = try await self.nuvem.baixar("api/transcripts/\(tid)/video", para: Self.pastaRecebidos,
+                                                       nomePadrao: base + ".mp4") { pr in
+                    Task { @MainActor in self.etapa(id, "Baixando para o iPhone", pr) }
+                }
+                if let formato = await Compatibilidade.problema(novo) {
+                    try? FileManager.default.removeItem(at: novo)
+                    throw ErroApp("A nuvem devolveu o vídeo ainda em \(formato). Confira se ela já está atualizada.")
+                }
+                for n in antigos { try? FileManager.default.removeItem(at: item.url(n)) }
+                let destino = Nuvem.semColisao(item.url(base + "." + novo.pathExtension))
+                try FileManager.default.moveItem(at: novo, to: destino)
+                self.concluir(id, arquivos: [destino.lastPathComponent], inicio: inicio, duracao: p.info.duracao)
+            } catch {
+                // não deu (ou foi cancelado): o resultado volta a ser o que era, com o original
+                self.historico.atualizar(id) { $0.estado = .pronto; $0.mensagem = nil; $0.progresso = nil; $0.trabalho = nil }
+                if !(error is CancellationError) {
+                    self.aviso = "Não consegui converter: " + ((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+                }
+            }
+        }
+    }
+
     func transcreverLink(_ info: InfoLink, naNuvem: Bool, idioma: String, padrao: String = Renomear.padrao) {
         let base = PadraoNome.base(info.titulo, padrao: padrao, data: Date())
         let id = novoItem(.transcricao, info.titulo, nuvem: naNuvem, mensagem: "Pedindo à nuvem", base: base)
@@ -1255,6 +1376,11 @@ final class Estudio {
             aviso = "A GPU fechou o app no último tratamento de voz e foi desligada (Ajustes › Tratar voz no iPhone). O tratamento volta a rodar no processador, com o mesmo resultado, só que mais devagar."
         }
         for i in historico.itens where i.estado == .processando && tarefas[i.id] == nil {
+            if i.convertendoLocal == true {
+                // "Converter para o iPhone" interrompido pelo fechamento do app: o original continua lá
+                historico.atualizar(i.id) { $0.estado = .pronto; $0.mensagem = nil; $0.progresso = nil; $0.convertendoLocal = nil }
+                continue
+            }
             if i.tipo == .legenda, i.reedicao != nil {
                 // já transcrita; o app fechou enquanto gravava uma edição: o item volta ao normal
                 historico.atualizar(i.id) { $0.estado = .pronto; $0.mensagem = nil; $0.progresso = nil }
