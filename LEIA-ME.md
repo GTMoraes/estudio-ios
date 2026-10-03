@@ -207,6 +207,16 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
   Download do Drive guarda a pasta de origem (`Item.pastaDrive` também no tipo `.drive`) para "Copiar link".
   Ajustes › Armazenamento (`CartaoArmazenamento`, `Estudio.arquivosGuardados/limparResultados/apagarArquivoGuardado`).
   O .zip é apagado quando a folha de compartilhar fecha (`Zip.limpar`). Novo: Áudio/vídeo, Imagens, Link, Drive, Compartilhar.
+- 0.16.0: vídeo que o iPhone não abre (VP9 do Instagram/YouTube: `Compatibilidade.problema`, por `isDecodable` e pelo
+  código do formato). O resultado avisa, some com Salvar no Fotos / Editar novamente / Usar em nova tarefa e deixa
+  Compartilhar e "Converter para o iPhone" (HEVC ou H.264). A conversão é na nuvem: `Estudio.converterParaIPhone`
+  pede o mesmo link com `compat` (`/api/link/start`), a nuvem recodifica e o arquivo do resultado é trocado; se
+  falhar, o original fica. Conversão local (decodificador embutido) fica para depois. "Copiar link" também nos
+  resultados baixados por link (`Item.linkDeOrigem`).
+- 0.17.0: **FFmpeg embutido (fundação).** `scripts/compilar-ffmpeg.sh` compila o FFmpeg 7.1.1 para arm64 em `vendor-ff/`
+  (LGPL, só leitura e decodificação: sem codificadores, muxers, rede ou programas), com cache próprio no Actions.
+  Ponte em `App/Codificadores/Decodificador.{h,c}`; Ajustes › Sobre mostra a versão e se há VP9/AV1. Ainda não muda
+  nada no uso: a conversão local ("Converter para o iPhone" sem nuvem) vem na 0.17.1.
 - 0.14.0: o seletor de idioma ficou. Sem ele, um vídeo em outra língua seria tratado como português.
 
 ## Correções (0.11.1)

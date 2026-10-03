@@ -17,7 +17,7 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     TARGETED_DEVICE_FAMILY: "1"
-    MARKETING_VERSION: "0.15.1"
+    MARKETING_VERSION: "0.17.0"
     CURRENT_PROJECT_VERSION: "1"
     CODE_SIGNING_ALLOWED: "NO"
     CODE_SIGNING_REQUIRED: "NO"
@@ -88,9 +88,9 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gtm.estudio
         SWIFT_OBJC_BRIDGING_HEADER: App/Codificadores/Estudio-Bridging-Header.h
-        HEADER_SEARCH_PATHS: "$(PROJECT_DIR)/vendor/include $(PROJECT_DIR)/App/MotorVoz"
-        LIBRARY_SEARCH_PATHS: $(PROJECT_DIR)/vendor/lib
-        OTHER_LDFLAGS: "-lmp3lame -lvorbisenc -lvorbis -logg -lwebpmux -lwebp -lsharpyuv -lc++ -framework CoreML"
+        HEADER_SEARCH_PATHS: "$(PROJECT_DIR)/vendor/include $(PROJECT_DIR)/vendor-ff/include $(PROJECT_DIR)/App/MotorVoz"
+        LIBRARY_SEARCH_PATHS: "$(PROJECT_DIR)/vendor/lib $(PROJECT_DIR)/vendor-ff/lib"
+        OTHER_LDFLAGS: "-lmp3lame -lvorbisenc -lvorbis -logg -lwebpmux -lwebp -lsharpyuv -lavformat -lavcodec -lswresample -lswscale -lavutil -lz -lc++ -framework CoreML"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
     scheme: {}

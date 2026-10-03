@@ -45,6 +45,8 @@ struct AjustesView: View {
                     Cartao(titulo: "Sobre", icone: "info.circle") {
                         let v = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
                         Text("Estúdio \(v)").font(.subheadline)
+                        Text("FFmpeg \(String(cString: estudio_ffmpeg_versao())) · VP9 \(estudio_ffmpeg_decodifica("vp9") == 1 ? "sim" : "não") · AV1 \(estudio_ffmpeg_decodifica("av1") == 1 ? "sim" : "não")")
+                            .font(.footnote).foregroundStyle(Tema.texto2)
                         Text("Os resultados ficam no app Arquivos, em “No meu iPhone › Estúdio › Resultados”.")
                             .font(.footnote).foregroundStyle(Tema.texto2)
                     }
