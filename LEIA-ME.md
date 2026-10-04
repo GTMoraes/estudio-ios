@@ -227,6 +227,15 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
 - 0.17.2: conversão local com escolha de qualidade (`ConversorCompat.Qualidade`: taxa de 2×, 1,4× ou 1× a original; a 0.17.1
   usava sempre 2×, por isso o HEVC saía com o dobro do tamanho do VP9). Áudio a 1,5× a taxa original (64 a 192 kb/s) em
   vez de 192 kb/s fixos. Faixa de aviso do app: não diz mais "Convertendo imagens" durante a conversão de vídeo.
+- 0.18.0: **posts do Instagram com fotos e carrosséis.** A nuvem identifica o post pelo gallery-dl (`kind: "post"` em
+  `/api/link/probe`) e baixa tudo na ordem (`mode: "post"`, arquivos em `/api/post/<id>/<n>`). `Estudio.baixarPost` traz
+  os arquivos numerados (`base-01.jpg`, `base-02.mp4`…); o resultado mostra fotos e vídeos em cartões separados e os
+  vídeos incompatíveis usam o "Converter para o iPhone". Ajustes › Instagram (`InstagramView.swift`): login na página do
+  Instagram dentro do app (WKWebView com sessão descartável) e envio só dos cookies à nuvem; a senha não passa pelo app.
+- 0.18.1: resultado com fotos e vídeos juntos numa grade só, na ordem dos arquivos, com filtro Tudo / Fotos / Vídeos
+  (`GradeMista.swift`).
+- 0.18.2: a tela cheia do resultado misto é uma só (`VisualizadorVideos` passou a abrir imagem também: `ZoomImagem` e
+  `PainelInfoImagem` na página de foto, salvar no Fotos conforme o tipo). Deslizar passa por fotos e vídeos na ordem.
 - 0.14.0: o seletor de idioma ficou. Sem ele, um vídeo em outra língua seria tratado como português.
 
 ## Correções (0.11.1)

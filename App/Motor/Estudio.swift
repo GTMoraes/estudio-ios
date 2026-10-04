@@ -578,6 +578,7 @@ final class Estudio {
         case .video: baixarLink(p.info, modo: "video", padrao: p.padrao)
         case .audio: baixarLink(p.info, modo: "audio", padrao: p.padrao)
         case .transcrever: transcreverLink(p.info, naNuvem: p.naNuvem, idioma: p.idioma, padrao: p.padrao)
+        case .post: baixarPost(p.info, padrao: p.padrao)
         }
     }
 
@@ -1244,6 +1245,47 @@ final class Estudio {
         }
     }
 
+    /// Post do Instagram com fotos (ou carrossel de fotos e vídeos): a nuvem baixa tudo e o app traz
+    /// os arquivos na ordem do post, numerados.
+    func baixarPost(_ info: InfoLink, padrao: String = Renomear.padrao) {
+        let base = PadraoNome.base(info.titulo, padrao: padrao, data: Date())
+        let soVideos = (info.videos ?? 0) > 0 && info.videos == info.quantidade
+        let id = novoItem(soVideos ? .video : .imagem, info.titulo, nuvem: true, mensagem: "Pedindo à nuvem", base: base)
+        historico.atualizar(id) {
+            $0.pedidoLink = PedidoLink(info: info, acao: .post, naNuvem: true, idioma: self.idioma, padrao: padrao)
+        }
+        let inicio = Date()
+        rodar(id, segundoPlano: "Baixando post pela nuvem") {
+            let job = try await self.nuvem.iniciarLink(info.link, modo: "post", idioma: self.idioma, titulo: info.titulo)
+            self.historico.atualizar(id) { $0.trabalho = job }
+            let r = try await self.nuvem.aguardar(job) { m in Task { @MainActor in self.etapa(id, m) } }
+            try await self.guardarPost(id, r, base: base, inicio: inicio)
+        }
+    }
+
+    private func guardarPost(_ id: UUID, _ r: [String: Any], base: String, inicio: Date) async throws {
+        guard let post = r["post"] as? String, let lista = r["files"] as? [[String: Any]], !lista.isEmpty,
+              let item = historico.item(id) else { throw ErroApp("Resposta incompleta da nuvem.") }
+        var nomes: [String] = []
+        for (k, f) in lista.enumerated() {
+            try Task.checkCancellation()
+            let ext = (f["ext"] as? String) ?? "jpg"
+            let n = (f["n"] as? Int) ?? k
+            let numero = String(format: "%02d", k + 1)
+            let nome = lista.count == 1 ? "\(base).\(ext)" : "\(base)-\(numero).\(ext)"
+            let rotulo = lista.count == 1 ? "Baixando para o iPhone" : "Baixando para o iPhone (\(k + 1) de \(lista.count))"
+            let tmp = try await self.nuvem.baixar("api/post/\(post)/\(n)", para: Self.pastaRecebidos, nomePadrao: nome) { p in
+                Task { @MainActor in self.etapa(id, rotulo, (Double(k) + p) / Double(lista.count)) }
+            }
+            try FileManager.default.createDirectory(at: item.pasta, withIntermediateDirectories: true)
+            let destino = Nuvem.semColisao(item.url(nome))
+            try FileManager.default.moveItem(at: tmp, to: destino)
+            nomes.append(destino.lastPathComponent)
+        }
+        await nuvem.apagarPost(post)
+        concluir(id, arquivos: nomes, inicio: inicio)
+    }
+
     /// Vídeo que o iPhone não abre (qualquer origem): o FFmpeg embutido decodifica e o iPhone grava em
     /// HEVC ou H.264. Cada arquivo incompatível do resultado é trocado pelo convertido; se falhar ou
     /// for cancelado, o original continua lá.
@@ -1389,8 +1431,10 @@ final class Estudio {
             if i.naNuvem, let job = i.trabalho {
                 let id = i.id, inicio = i.criado, base = i.baseSaida ?? Self.base(i.titulo), tipo = i.tipo
                 let personalizado = i.baseSaida != nil
+                let ehPost = i.pedidoLink?.acao == .post
                 rodar(id) {
                     let r = try await self.nuvem.aguardar(job) { m in Task { @MainActor in self.etapa(id, m) } }
+                    if ehPost { try await self.guardarPost(id, r, base: base, inicio: inicio); return }
                     switch tipo {
                     case .transcricao: try await self.guardarTranscricaoDaNuvem(id, r, base: base, inicio: inicio)
                     case .voz: try await self.guardarVozDaNuvem(id, r, inicio: inicio, base: personalizado ? base : nil)

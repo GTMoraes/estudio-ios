@@ -84,6 +84,7 @@ struct VisualizadorVideos: View {
     private var indiceEdicao: Int? {
         guard let r = item.reedicao, r.tipo != .legenda, !item.arquivos.isEmpty else { return nil }
         let nome = item.arquivos[min(atual, item.arquivos.count - 1)]
+        if ehImagem(item.url(nome)) { return nil }
         if r.tipo == .loteConversao {
             guard let k = (r.saidas ?? []).firstIndex(where: { $0 == nome }), k < r.entradas.count else { return nil }
             return k
@@ -121,16 +122,30 @@ struct VisualizadorVideos: View {
             VStack(spacing: 0) {
                 TabView(selection: $atual) {
                     ForEach(Array(item.arquivos.enumerated()), id: \.offset) { k, nome in
-                        PaginaVideo(url: item.url(nome), ativo: atual == k).tag(k)
+                        // um resultado pode misturar fotos e vídeos (carrossel): cada página abre conforme o arquivo
+                        Group {
+                            if ehImagem(item.url(nome)) {
+                                ZoomImagem(url: item.url(nome)).ignoresSafeArea(edges: .horizontal)
+                            } else {
+                                PaginaVideo(url: item.url(nome), ativo: atual == k)
+                            }
+                        }
+                        .tag(k)
                     }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
                 if mostrarInfo, !item.arquivos.isEmpty {
                     let nome = item.arquivos[min(atual, item.arquivos.count - 1)]
-                    PainelInfoVideo(url: item.url(nome), origem: item.origensMidia?[nome] ?? item.origemMidia)
-                        .id(nome)
-                        .frame(maxHeight: 340)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    Group {
+                        if ehImagem(item.url(nome)) {
+                            PainelInfoImagem(url: item.url(nome), origem: item.origens?[nome])
+                        } else {
+                            PainelInfoVideo(url: item.url(nome), origem: item.origensMidia?[nome] ?? item.origemMidia)
+                        }
+                    }
+                    .id(nome)
+                    .frame(maxHeight: 340)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
             .background(Color.black.ignoresSafeArea())
@@ -181,7 +196,8 @@ struct VisualizadorVideos: View {
     }
 
     private func salvarNoFotos(_ u: URL) {
-        confirmar = Confirmacao(titulo: "Salvar na galeria do iPhone?", mensagem: "O vídeo entra no app Fotos.",
+        confirmar = Confirmacao(titulo: "Salvar na galeria do iPhone?",
+                                mensagem: ehImagem(u) ? "A imagem entra no app Fotos." : "O vídeo entra no app Fotos.",
                                 botao: "Salvar", destrutivo: false) { gravarNoFotos(u) }
     }
 
@@ -192,10 +208,11 @@ struct VisualizadorVideos: View {
                 return
             }
             PHPhotoLibrary.shared().performChanges({
-                PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: u)
+                if ehImagem(u) { PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: u) }
+                else { PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: u) }
             }) { ok, erro in
                 Task { @MainActor in
-                    aviso = ok ? "Vídeo salvo no Fotos." : "Não consegui salvar: \(erro?.localizedDescription ?? "formato não aceito pelo Fotos")"
+                    aviso = ok ? (ehImagem(u) ? "Imagem salva no Fotos." : "Vídeo salvo no Fotos.") : "Não consegui salvar: \(erro?.localizedDescription ?? "formato não aceito pelo Fotos")"
                 }
             }
         }

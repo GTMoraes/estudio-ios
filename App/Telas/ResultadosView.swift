@@ -220,13 +220,22 @@ struct DetalheView: View {
                             .buttonStyle(.glassProminent)
                         }
                     }
-                    if item.estado == .pronto, item.tipo == .imagem {
-                        Cartao(titulo: item.arquivos.count == 1 ? "Imagem" : "\(item.arquivos.count) imagens", icone: "photo.on.rectangle") {
-                            GradeImagens(item: item)
-                        }
-                    } else if item.estado == .pronto, item.tipo == .video {
-                        Cartao(titulo: item.arquivos.count == 1 ? "Vídeo" : "\(item.arquivos.count) vídeos", icone: "film.stack") {
-                            GradeVideos(item: item).id(item.estado)      // arquivo trocado (conversão): refaz as miniaturas
+                    if item.estado == .pronto, item.tipo == .imagem || item.tipo == .video {
+                        // um resultado pode ter fotos e vídeos juntos (carrossel do Instagram): os nomes são numerados na ordem do post
+                        let fotos = item.arquivos.filter { ehImagem(item.url($0)) }
+                        let filmes = item.arquivos.filter { !ehImagem(item.url($0)) }
+                        if !fotos.isEmpty && !filmes.isEmpty {
+                            Cartao(titulo: "\(item.arquivos.count) arquivos", icone: "square.grid.2x2") {
+                                GradeMista(item: item).id(item.estado)
+                            }
+                        } else if !fotos.isEmpty {
+                            Cartao(titulo: fotos.count == 1 ? "Imagem" : "\(fotos.count) imagens", icone: "photo.on.rectangle") {
+                                GradeImagens(item: soCom(item, fotos))
+                            }
+                        } else if !filmes.isEmpty {
+                            Cartao(titulo: filmes.count == 1 ? "Vídeo" : "\(filmes.count) vídeos", icone: "film.stack") {
+                                GradeVideos(item: soCom(item, filmes)).id(item.estado)      // arquivo trocado (conversão): refaz as miniaturas
+                            }
                         }
                     } else if item.estado == .pronto, item.tipo != .drive {
                         Cartao(titulo: "Arquivos", icone: "folder.fill") {
@@ -347,6 +356,12 @@ struct DetalheView: View {
         confirmar = Confirmacao(titulo: "Converter pela nuvem?",
                                 mensagem: "O vídeo convertido entra no lugar deste.",
                                 botao: "Converter", destrutivo: false) { estudio.converterPelaNuvem(id, codec: "hevc") }
+    }
+
+    private func soCom(_ item: Item, _ nomes: [String]) -> Item {
+        var c = item
+        c.arquivos = nomes
+        return c
     }
 
     private func abrirSePedido() {

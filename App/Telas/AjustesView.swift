@@ -25,6 +25,7 @@ struct AjustesView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     contaNuvem
+                    if estudio.logado { CartaoInstagram() }
                     CartaoContaGoogle()
                     CartaoDrive()
                     Cartao(titulo: "Padrões", icone: "slider.horizontal.3") {

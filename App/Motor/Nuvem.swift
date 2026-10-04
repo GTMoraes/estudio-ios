@@ -137,11 +137,17 @@ final class Nuvem: @unchecked Sendable {
 
     func identificar(link: String) async throws -> InfoLink {
         let r = try await objeto("api/link/probe", metodo: "POST", json: ["url": link])
-        return InfoLink(titulo: r["title"] as? String ?? "(sem título)",
-                        autor: r["uploader"] as? String ?? "",
-                        site: r["site"] as? String ?? "",
-                        duracao: r["duration"] as? Double,
-                        link: (r["webpage_url"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? link)
+        var info = InfoLink(titulo: r["title"] as? String ?? "(sem título)",
+                            autor: r["uploader"] as? String ?? "",
+                            site: r["site"] as? String ?? "",
+                            duracao: r["duration"] as? Double,
+                            link: (r["webpage_url"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? link)
+        if (r["kind"] as? String) == "post" {        // post de fotos / carrossel do Instagram
+            info.post = true
+            info.quantidade = r["count"] as? Int
+            info.videos = r["videos"] as? Int
+        }
+        return info
     }
 
     /// modo: "video", "audio" ou "transcribe"
@@ -152,6 +158,29 @@ final class Nuvem: @unchecked Sendable {
         let r = try await objeto("api/link/start", metodo: "POST", json: corpo)
         guard let j = r["job_id"] as? String else { throw ErroApp("A nuvem não iniciou o download.") }
         return j
+    }
+
+    // MARK: - conta do Instagram (cookies da sessão, guardados só na nuvem)
+
+    struct EstadoInstagram { var temConta: Bool; var podeGerenciar: Bool; var atualizado: Date? }
+
+    func estadoInstagram() async throws -> EstadoInstagram {
+        let r = try await objeto("api/instagram/status")
+        return EstadoInstagram(temConta: r["has_cookies"] as? Bool ?? false,
+                               podeGerenciar: r["can_manage"] as? Bool ?? false,
+                               atualizado: (r["updated"] as? Double).map { Date(timeIntervalSince1970: $0) })
+    }
+
+    func enviarCookiesInstagram(_ cookies: [[String: Any]]) async throws {
+        try await pedir("api/instagram/cookies", metodo: "POST", json: ["cookies": cookies])
+    }
+
+    func removerInstagram() async throws {
+        try await pedir("api/instagram/cookies", metodo: "DELETE")
+    }
+
+    func apagarPost(_ id: String) async {
+        _ = try? await pedir("api/post/\(id)", metodo: "DELETE")
     }
 
     struct EstadoTrabalho {
@@ -290,6 +319,9 @@ struct InfoLink: Codable, Equatable {
     var site: String
     var duracao: Double?
     var link: String
+    var post: Bool?            // post do Instagram com fotos (ou carrossel): baixa tudo, na ordem
+    var quantidade: Int?       // arquivos no post
+    var videos: Int?           // quantos deles são vídeo
 }
 
 struct OpcoesVoz: Codable, Equatable {

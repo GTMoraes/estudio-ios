@@ -93,7 +93,7 @@ struct Retomada: Codable, Equatable {
 
 /// Um pedido feito a partir de um link (baixar ou transcrever), guardado para repetir.
 struct PedidoLink: Codable, Equatable {
-    enum Acao: String, Codable { case video, audio, transcrever }
+    enum Acao: String, Codable { case video, audio, transcrever, post }
     var info: InfoLink
     var acao: Acao
     var naNuvem: Bool

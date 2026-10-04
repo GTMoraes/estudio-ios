@@ -101,6 +101,19 @@ struct PainelLink: View {
                     }
                     .font(.subheadline).foregroundStyle(Tema.texto2)
                 }
+                if info.post == true {
+                    let n = info.quantidade ?? 1, v = info.videos ?? 0
+                    let b = PadraoNome.base(info.titulo, padrao: padrao, data: Date())
+                    CartaoNomeSaida(padrao: $padrao, previa: [n == 1 ? b + ".jpg" : b + "-01.jpg, " + b + "-02…"],
+                                    nota: "{nome} = começo da legenda do post; {data} e {datahora} = agora.")
+                    Cartao(titulo: "Baixar", icone: "arrow.down.circle.fill") {
+                        Text(n == 1 ? "1 imagem" : (v == 0 ? "\(n) imagens" : "\(n) arquivos: \(n - v) imagens e \(v) vídeos, na ordem do post"))
+                            .font(.subheadline).foregroundStyle(Tema.texto2)
+                        BotaoPrincipal(titulo: n == 1 ? "Baixar a imagem" : "Baixar tudo", icone: "square.and.arrow.down") {
+                            usar(); estudio.baixarPost(info, padrao: padrao); fechar()
+                        }
+                    }
+                } else {
                 let b = PadraoNome.base(info.titulo, padrao: padrao, data: Date())
                 CartaoNomeSaida(padrao: $padrao, previa: [b + ".mp4 / .m4a / .txt"],
                                 nota: "{nome} = título do vídeo; {data} e {datahora} = agora. Vale para baixar e transcrever.")
@@ -123,6 +136,7 @@ struct PainelLink: View {
                     BotaoPrincipal(titulo: "Transcrever", icone: "text.badge.checkmark") {
                         usar(); estudio.transcreverLink(info, naNuvem: naNuvem, idioma: idioma, padrao: padrao); fechar()
                     }
+                }
                 }
             } else if let erro {
                 Cartao(titulo: "Não deu para identificar", icone: "exclamationmark.triangle.fill") {
