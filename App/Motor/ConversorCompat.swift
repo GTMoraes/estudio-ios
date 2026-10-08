@@ -126,6 +126,9 @@ enum ConversorCompat {
         var acabou = false
         var ultimoV = CMTime.invalid
         var ultimoAviso = -1.0
+        var fimV = false, fimA = false
+        var restaAntes = -1
+        var parado = Date()
 
         while true {
             if sinal.cancelado { escritor.cancelWriting(); throw CancellationError() }
@@ -142,7 +145,17 @@ enum ConversorCompat {
                 }
             }
             if acabou {
-                if filaV.isEmpty && filaA.isEmpty { break }
+                // a origem acabou: a trilha que já entregou tudo é encerrada na hora. Sem isso, o gravador
+                // segura os últimos quadros de uma trilha à espera de mais dados da outra, que nunca chegam.
+                if filaV.isEmpty && !fimV { entradaV.markAsFinished(); fimV = true }
+                if filaA.isEmpty && !fimA { entradaA?.markAsFinished(); fimA = true }
+                if fimV && fimA { break }
+                let resta = filaV.count + filaA.count
+                if resta != restaAntes { restaAntes = resta; parado = Date() }
+                if Date().timeIntervalSince(parado) > 15 {
+                    escritor.cancelWriting()
+                    throw ErroApp("A gravação parou no fim do vídeo e não terminou.")
+                }
                 Thread.sleep(forTimeInterval: 0.004); continue
             }
             // filas cheias: espera. Exceção: uma fila cheia e a outra vazia quer dizer que o gravador
@@ -192,11 +205,12 @@ enum ConversorCompat {
             }
         }
 
-        entradaV.markAsFinished()
-        entradaA?.markAsFinished()
         let fim = DispatchSemaphore(value: 0)
         escritor.finishWriting { fim.signal() }
-        fim.wait()
+        if fim.wait(timeout: .now() + 120) == .timedOut {
+            escritor.cancelWriting()
+            throw ErroApp("O iPhone não terminou de fechar o arquivo convertido.")
+        }
         guard escritor.status == .completed else { throw falha(escritor) }
         progresso(1)
     }

@@ -150,6 +150,8 @@ struct DetalheView: View {
     @State private var buscandoOriginal = false
     /// Formato do vídeo que o iPhone não abre (ex.: "VP9"); nil = abre normalmente.
     @State private var incompativel: String?
+    /// O vídeo incompatível é HEVC com etiqueta "hev1": resolve trocando a etiqueta, sem converter.
+    @State private var soEtiqueta = false
     @State private var confirmar: Confirmacao?
 
     var body: some View {
@@ -202,22 +204,20 @@ struct DetalheView: View {
                         Cartao {
                             Label("O iPhone não abre este vídeo (formato \(formato)).", systemImage: "exclamationmark.triangle.fill")
                                 .font(.subheadline.weight(.semibold)).foregroundStyle(.yellow)
-                            Text("Não feche o Estúdio enquanto a conversão acontece.")
-                                .font(.footnote).foregroundStyle(Tema.texto2)
-                            Menu {
-                                Button("HEVC · qualidade máxima (arquivo ~2× maior)") { pedirConversao(.hevc, .maxima, "HEVC") }
-                                Button("HEVC · equilibrado (~1,4× maior)") { pedirConversao(.hevc, .equilibrada, "HEVC") }
-                                Button("HEVC · mesmo tamanho do original") { pedirConversao(.hevc, .mesmoTamanho, "HEVC") }
-                                Button("H.264 · mais compatível (~2,6× maior)") { pedirConversao(.h264, .maxima, "H.264") }
-                                if item.pedidoLink != nil {
-                                    Divider()
-                                    Button("Pela nuvem, em HEVC") { pedirConversaoNaNuvem() }
+                            if soEtiqueta {
+                                Text("O vídeo já está em HEVC; só a etiqueta do arquivo é de Android. O ajuste troca a etiqueta, sem regravar e sem perder qualidade.")
+                                    .font(.footnote).foregroundStyle(Tema.texto2)
+                                Button { estudio.ajustarEtiqueta(id) } label: {
+                                    Label("Ajustar para o iPhone (sem perda)", systemImage: "wand.and.stars")
+                                        .frame(maxWidth: .infinity).padding(.vertical, 4)
                                 }
-                            } label: {
-                                Label("Converter para o iPhone", systemImage: "arrow.triangle.2.circlepath")
-                                    .frame(maxWidth: .infinity).padding(.vertical, 4)
+                                .buttonStyle(.glassProminent)
+                                menuConversao(item, titulo: "Converter mesmo assim").buttonStyle(.glass)
+                            } else {
+                                Text("Não feche o Estúdio enquanto a conversão acontece.")
+                                    .font(.footnote).foregroundStyle(Tema.texto2)
+                                menuConversao(item, titulo: "Converter para o iPhone").buttonStyle(.glassProminent)
                             }
-                            .buttonStyle(.glassProminent)
                         }
                     }
                     if item.estado == .pronto, item.tipo == .imagem || item.tipo == .video {
@@ -320,12 +320,16 @@ struct DetalheView: View {
             .navigationBarTitleDisplayMode(.inline)
             .task(id: item.estado.rawValue + "|" + item.arquivos.joined(separator: "|")) {
                 var achado: String?
+                var etiqueta = false
                 if item.estado == .pronto {
                     for n in item.arquivos {
-                        if let f = await Compatibilidade.problema(item.url(n)) { achado = f; break }
+                        if let f = await Compatibilidade.problema(item.url(n)) {
+                            achado = f; etiqueta = Etiqueta.posicao(item.url(n)) != nil; break
+                        }
                     }
                 }
                 incompativel = achado
+                soEtiqueta = etiqueta
             }
             .task(id: item.estado) {
                 if item.tipo == .transcricao, item.estado == .pronto,
@@ -343,6 +347,22 @@ struct DetalheView: View {
             .onChange(of: estudio.abrirLegenda) { abrirSePedido() }
         } else {
             ContentUnavailableView("Item apagado", systemImage: "trash").telaEscura()
+        }
+    }
+
+    private func menuConversao(_ item: Item, titulo: String) -> some View {
+        Menu {
+            Button("HEVC · qualidade máxima (arquivo ~2× maior)") { pedirConversao(.hevc, .maxima, "HEVC") }
+            Button("HEVC · equilibrado (~1,4× maior)") { pedirConversao(.hevc, .equilibrada, "HEVC") }
+            Button("HEVC · mesmo tamanho do original") { pedirConversao(.hevc, .mesmoTamanho, "HEVC") }
+            Button("H.264 · mais compatível (~2,6× maior)") { pedirConversao(.h264, .maxima, "H.264") }
+            if item.pedidoLink != nil {
+                Divider()
+                Button("Pela nuvem, em HEVC") { pedirConversaoNaNuvem() }
+            }
+        } label: {
+            Label(titulo, systemImage: "arrow.triangle.2.circlepath")
+                .frame(maxWidth: .infinity).padding(.vertical, 4)
         }
     }
 

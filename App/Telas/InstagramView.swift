@@ -15,10 +15,19 @@ struct CartaoInstagram: View {
             Text("Fotos e carrosséis do Instagram só baixam com uma conta conectada. Prefira uma conta secundária.")
                 .font(.footnote).foregroundStyle(Tema.texto2)
             if let e = estado {
-                Label(e.temConta ? "Conta conectada" + (e.atualizado.map { " em " + $0.formatted(.dateTime.day().month().year()) } ?? "")
-                                 : "Nenhuma conta conectada",
-                      systemImage: e.temConta ? "checkmark.circle.fill" : "circle")
-                    .font(.subheadline)
+                if e.temConta, e.valida == false {
+                    Label("A sessão venceu: entre de novo", systemImage: "exclamationmark.triangle.fill")
+                        .font(.subheadline).foregroundStyle(.yellow)
+                } else {
+                    Label(e.temConta ? "Conta conectada" + (e.atualizado.map { " em " + $0.formatted(.dateTime.day().month().year()) } ?? "")
+                                     : "Nenhuma conta conectada",
+                          systemImage: e.temConta ? "checkmark.circle.fill" : "circle")
+                        .font(.subheadline)
+                    if e.temConta, e.valida == nil {
+                        Text("Não consegui confirmar com o Instagram se a sessão ainda vale.")
+                            .font(.caption).foregroundStyle(Tema.texto2)
+                    }
+                }
                 if e.podeGerenciar {
                     Button { entrando = true } label: {
                         Label(e.temConta ? "Entrar de novo" : "Entrar no Instagram", systemImage: "person.crop.circle.badge.plus")

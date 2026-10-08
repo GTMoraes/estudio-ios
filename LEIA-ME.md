@@ -236,6 +236,13 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
   (`GradeMista.swift`).
 - 0.18.2: a tela cheia do resultado misto é uma só (`VisualizadorVideos` passou a abrir imagem também: `ZoomImagem` e
   `PainelInfoImagem` na página de foto, salvar no Fotos conforme o tipo). Deslizar passa por fotos e vídeos na ordem.
+- 0.18.3: Ajustes › Instagram mostra se a sessão ainda vale (a nuvem pergunta ao Instagram em `/api/instagram/status`,
+  campo `valid`). Na nuvem, o yt-dlp passou a usar a conta conectada em links do Instagram (reels pedindo login) e
+  Stories vão pelo gallery-dl.
+- 0.18.4: **conversão que parava em 99%.** Quando o áudio acabava antes do vídeo, o gravador segurava os últimos
+  quadros à espera de áudio; agora cada trilha é encerrada assim que entrega tudo (`ConversorCompat.executar`), com
+  limite de 15 s parado e de 120 s para fechar o arquivo. **Ajustar para o iPhone (sem perda):** vídeo HEVC com etiqueta
+  `hev1` (Android) tem a etiqueta trocada por `hvc1` numa cópia, sem regravar (`Etiqueta.swift`, `Estudio.ajustarEtiqueta`).
 - 0.14.0: o seletor de idioma ficou. Sem ele, um vídeo em outra língua seria tratado como português.
 
 ## Correções (0.11.1)

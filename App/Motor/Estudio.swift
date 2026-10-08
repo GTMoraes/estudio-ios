@@ -1338,6 +1338,44 @@ final class Estudio {
         }
     }
 
+    /// Vídeo HEVC com a etiqueta "hev1" (Android): troca a etiqueta por "hvc1" numa cópia, sem regravar,
+    /// e a cópia entra no lugar do original. Se o iPhone ainda não abrir, o original continua lá.
+    func ajustarEtiqueta(_ id: UUID) {
+        guard tarefas[id] == nil, let item = historico.item(id), item.estado == .pronto else { return }
+        historico.atualizar(id) { $0.estado = .processando; $0.mensagem = "Ajustando para o iPhone"; $0.progresso = nil }
+        atualizarTela()
+        rodar(id) {
+            do {
+                let nomes = self.historico.item(id)?.arquivos ?? []
+                var feitos = 0
+                for nome in nomes {
+                    try Task.checkCancellation()
+                    let origem = item.url(nome)
+                    guard Etiqueta.posicao(origem) != nil else { continue }
+                    let problema = await Compatibilidade.problema(origem)
+                    guard problema != nil else { continue }
+                    let ext = origem.pathExtension.isEmpty ? "mp4" : origem.pathExtension
+                    let tmp = Self.pastaRecebidos.appendingPathComponent(UUID().uuidString + "." + ext)
+                    try Etiqueta.ajustar(origem, para: tmp)
+                    let ainda = await Compatibilidade.problema(tmp)
+                    if ainda != nil {
+                        try? FileManager.default.removeItem(at: tmp)
+                        throw ErroApp("mesmo com o ajuste o iPhone não abriu o vídeo. Use a conversão.")
+                    }
+                    try FileManager.default.removeItem(at: origem)
+                    try FileManager.default.moveItem(at: tmp, to: origem)
+                    feitos += 1
+                }
+                if feitos == 0 { throw ErroApp("não há vídeo para ajustar neste resultado.") }
+            } catch {
+                if !(error is CancellationError) {
+                    self.aviso = "Não consegui ajustar: " + ((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+                }
+            }
+            self.historico.atualizar(id) { $0.estado = .pronto; $0.mensagem = nil; $0.progresso = nil }
+        }
+    }
+
     /// Vídeo de link que o iPhone não abre: pede o mesmo link à nuvem de novo, agora convertido
     /// (codec: "hevc" ou "h264"), e troca o arquivo do resultado. Se falhar, o original continua lá.
     func converterPelaNuvem(_ id: UUID, codec: String) {

@@ -162,13 +162,15 @@ final class Nuvem: @unchecked Sendable {
 
     // MARK: - conta do Instagram (cookies da sessão, guardados só na nuvem)
 
-    struct EstadoInstagram { var temConta: Bool; var podeGerenciar: Bool; var atualizado: Date? }
+    /// valida: a nuvem perguntou ao Instagram se a sessão ainda vale (nil = não deu para saber).
+    struct EstadoInstagram { var temConta: Bool; var podeGerenciar: Bool; var atualizado: Date?; var valida: Bool? }
 
     func estadoInstagram() async throws -> EstadoInstagram {
         let r = try await objeto("api/instagram/status")
         return EstadoInstagram(temConta: r["has_cookies"] as? Bool ?? false,
                                podeGerenciar: r["can_manage"] as? Bool ?? false,
-                               atualizado: (r["updated"] as? Double).map { Date(timeIntervalSince1970: $0) })
+                               atualizado: (r["updated"] as? Double).map { Date(timeIntervalSince1970: $0) },
+                               valida: r["valid"] as? Bool)
     }
 
     func enviarCookiesInstagram(_ cookies: [[String: Any]]) async throws {
