@@ -1,0 +1,68 @@
+name: Converter CrisperWhisper (teste)
+
+# Só roda quando você manda (aba Actions > "Converter CrisperWhisper (teste)" > Run workflow).
+on:
+  workflow_dispatch:
+
+jobs:
+  converter:
+    runs-on: macos-26
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar ferramentas
+        run: |
+          python -m pip install --upgrade pip
+          pip install "git+https://github.com/argmaxinc/whisperkittools"
+          pip install "crisperwhisper[transformers]"
+          pip freeze | grep -iE "torch|transformers|coremltools|whisperkit|crisper|huggingface" | tee versoes.txt
+
+      - name: Converter para Core ML (com os testes de fidelidade da própria ferramenta)
+        run: |
+          set -o pipefail
+          whisperkit-generate-model -h | tee ajuda.txt
+          whisperkit-generate-model \
+            --model-version nyralabs/CrisperWhisper2.0_turbo \
+            --output-dir saida \
+            --text-decoder-max-sequence-length 448 2>&1 | tee conversao.log
+          find saida -maxdepth 4 \( -name "*.mlmodelc" -o -name "*.json" \) | tee arquivos.txt
+          du -sh saida/* | tee -a arquivos.txt
+
+      - name: Comparar Core ML com o modelo original no áudio de teste
+        run: |
+          set -o pipefail
+          if [ -z "$(find saida -maxdepth 4 -name TextDecoder.mlmodelc | head -1)" ]; then
+            echo "sem .mlmodelc: compilando os .mlpackage"
+            for p in $(find saida -maxdepth 4 -name "*.mlpackage"); do xcrun coremlcompiler compile "$p" "$(dirname "$p")"; done
+          fi
+          PASTA=$(dirname "$(find saida -maxdepth 4 -name TextDecoder.mlmodelc | head -1)")
+          echo "modelos em: $PASTA"
+          python testes/crisper/validar.py "$PASTA" testes/crisper/audio16k.wav validacao.json 2>&1 | tee validacao.log
+
+      - name: Guardar relatórios
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crisper-relatorios
+          path: |
+            versoes.txt
+            ajuda.txt
+            conversao.log
+            arquivos.txt
+            validacao.log
+            validacao.json
+            validacao.att*.npy
+          if-no-files-found: warn
+
+      - name: Guardar o modelo convertido
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crisper-coreml
+          path: saida
+          if-no-files-found: warn
