@@ -148,6 +148,7 @@ struct DetalheView: View {
         let edicao: UUID?            // nil = o projeto em andamento; senão, a versão de uma edição gravada
     }
     @State private var buscandoOriginal = false
+    @State private var editorVideo: AberturaEditor?
     /// Formato do vídeo que o iPhone não abre (ex.: "VP9"); nil = abre normalmente.
     @State private var incompativel: String?
     /// O vídeo incompatível é HEVC com etiqueta "hev1": resolve trocando a etiqueta, sem converter.
@@ -267,7 +268,33 @@ struct DetalheView: View {
                         Cartao {
                             MenuCompartilhar(urls: todos, nome: item.titulo,
                                              titulo: todos.count == 1 ? "Compartilhar" : "Compartilhar todos", aviso: $aviso)
-                            if incompativel == nil, let r = item.reedicao, r.tipo != .legenda {
+                            if incompativel == nil, item.tipo == .video {
+                                let videos = item.arquivos.map { item.url($0) }.filter { ehVideoArquivo($0) }
+                                if !videos.isEmpty {
+                                    Button {
+                                        editorVideo = AberturaEditor(fontes: videos, nomes: videos.map { $0.lastPathComponent })
+                                    } label: {
+                                        Label("Abrir no editor", systemImage: "timeline.selection")
+                                            .frame(maxWidth: .infinity).padding(.vertical, 4)
+                                    }
+                                    .buttonStyle(.glass)
+                                }
+                            }
+                            if item.reedicao?.tipo == .edicao {
+                                Button {
+                                    if let r = estudio.reabrirEdicao(id) {
+                                        editorVideo = AberturaEditor(fontes: r.fontes, nomes: r.fontes.map { $0.lastPathComponent },
+                                                                     projeto: r.projeto)
+                                    } else {
+                                        aviso = "As cópias dos vídeos usados nesta edição já foram apagadas (Ajustes › Originais)."
+                                    }
+                                } label: {
+                                    Label("Editar de novo", systemImage: "slider.horizontal.3")
+                                        .frame(maxWidth: .infinity).padding(.vertical, 4)
+                                }
+                                .buttonStyle(.glass)
+                            }
+                            if incompativel == nil, let r = item.reedicao, r.tipo != .legenda, r.tipo != .edicao {
                                 Button {
                                     buscandoOriginal = true
                                     Task {
@@ -342,6 +369,7 @@ struct DetalheView: View {
             } message: { Text(aviso ?? "") }
             .confirmar($confirmar)
             .fullScreenCover(item: $editor) { e in EditorLegenda(id: id, edicao: e.edicao) }
+            .fullScreenCover(item: $editorVideo) { e in EditorVideoView(aberto: e) {} }
             // legenda que acabou de ser transcrita: entra direto no editor
             .task { abrirSePedido() }
             .onChange(of: estudio.abrirLegenda) { abrirSePedido() }

@@ -69,7 +69,7 @@ struct OrigemImagem: Codable, Equatable {
 /// Tudo o que um trabalho no iPhone precisa para ser continuado depois que o app foi fechado.
 /// A entrada fica em Trabalhos/<id>/entrada (ver SegundoPlano.swift).
 struct Retomada: Codable, Equatable {
-    enum Tipo: String, Codable { case voz, conversao, imagens, transcricao, loteConversao, drive, legenda }
+    enum Tipo: String, Codable { case voz, conversao, imagens, transcricao, loteConversao, drive, legenda, edicao }
     var tipo: Tipo
     var entradas: [String]            // nomes dentro de Trabalhos/<id>/entrada
     var nome: String                  // nome do arquivo original
@@ -89,6 +89,8 @@ struct Retomada: Codable, Equatable {
     var drive: [Drive.Item]?              // download do Drive: os arquivos pedidos
     var converterDepois: Bool?
     var procedencias: [Procedencia?]?     // de onde veio cada entrada (para buscar o original de novo)
+    var edicao: ProjetoEdicao?            // editor de vídeo: os trechos (fontes = entradas, na mesma ordem)
+    var modoEdicao: ModoGravacaoEdicao?
 }
 
 /// Um pedido feito a partir de um link (baixar ou transcrever), guardado para repetir.

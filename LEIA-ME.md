@@ -252,6 +252,17 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
   método oficial (Viterbi com atenção + energia do mel; conferido contra o oficial) e a regra de corte
   aprovada ("8-normal-v3"). Grava em "CrisperWhisper-testes" o relatório, palavras.json e o áudio cortado.
   Ainda não portados: recomeço com temperatura para trechos vazios e recuperação de fim prematuro.
+- 0.19.0: **editor de vídeo** (`EditorVideoView.swift`, motor em `Motor/Edicao.swift`). Abre por Resultados
+  ("Abrir no editor" em vídeos), por Novo (depois de escolher um vídeo) e por vários vídeos ("Unir no editor").
+  Prévia que toca a edição como vai ser gravada; linha do tempo com miniaturas e onda do som, cursor fixo no
+  meio, pinça para aproximar; Dividir, Remover (sem "Tem certeza?": o Desfazer volta), alças para aparar,
+  Velocidade 0,25×–4× por trecho (tom mantido), Áudio (volume por trecho ou em tudo, até 100%: o mixer do iOS
+  não amplifica), Ordem (mover/duplicar), + Vídeo (galeria/Arquivos; o que o iPhone não abre é convertido na
+  hora para HEVC na qualidade máxima), Desfazer/Refazer. O primeiro vídeo define formato, cor (HDR) e fps;
+  os outros entram centrados com barras. Gravar: um vídeo (regravado pelo mesmo motor da conversão), cada
+  trecho num arquivo, só o áudio (M4A) ou sem regravar (um trecho, sem velocidade/volume). O resultado guarda
+  a edição: "Editar de novo" reabre com os vídeos guardados em Originais. As fontes entram no trabalho por
+  ligação direta ao arquivo (sem ocupar espaço de novo).
 - 0.14.0: o seletor de idioma ficou. Sem ele, um vídeo em outra língua seria tratado como português.
 
 ## Correções (0.11.1)

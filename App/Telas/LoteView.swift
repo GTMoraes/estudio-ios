@@ -14,7 +14,8 @@ struct PainelLoteVideos: View {
     @State private var proprios: [URL: AjusteConversao] = [:]
     @State private var editando: Editado?
     @State private var padrao = PadraoNome.ler(.conversao)
-    @State private var versaoLote = 0          // recria o painel do lote quando "Aplicar a todos" muda os ajustes
+    @State private var editorUnir: AberturaEditor?
+    @State private var versaoLote = 0         // recria o painel do lote quando "Aplicar a todos" muda os ajustes
 
     struct Editado: Identifiable { let id: URL }
 
@@ -36,8 +37,16 @@ struct PainelLoteVideos: View {
             }
             Text("Os ajustes abaixo valem para todos. Toque num vídeo da lista para ajustar só ele (inclusive o trecho).")
                 .font(.footnote).foregroundStyle(Tema.texto2)
+            let videos = validos.filter { infos[$0]?.temVideo == true }
+            if carregados && videos.count >= 2 {
+                Button { editorUnir = AberturaEditor(fontes: videos, nomes: videos.map { $0.lastPathComponent }) } label: {
+                    Label("Unir no editor", systemImage: "rectangle.stack.badge.plus").frame(maxWidth: .infinity).padding(.vertical, 4)
+                }
+                .buttonStyle(.glass)
+            }
         }
         .task { await carregar() }
+        .fullScreenCover(item: $editorUnir) { e in EditorVideoView(aberto: e) { fechar() } }
 
         PainelConverter(arquivo: referencia, nome: referencia.lastPathComponent, fechar: fechar,
                         modo: .lote, inicial: lote, mudou: { lote = $0 })

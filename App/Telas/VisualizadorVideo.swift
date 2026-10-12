@@ -82,7 +82,7 @@ struct VisualizadorVideos: View {
 
     /// Qual entrada do trabalho gerou o vídeo à vista (para "Editar novamente este vídeo").
     private var indiceEdicao: Int? {
-        guard let r = item.reedicao, r.tipo != .legenda, !item.arquivos.isEmpty else { return nil }
+        guard let r = item.reedicao, r.tipo != .legenda, r.tipo != .edicao, !item.arquivos.isEmpty else { return nil }
         let nome = item.arquivos[min(atual, item.arquivos.count - 1)]
         if ehImagem(item.url(nome)) { return nil }
         if r.tipo == .loteConversao {

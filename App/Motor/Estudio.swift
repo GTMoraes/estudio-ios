@@ -258,11 +258,11 @@ final class Estudio {
     /// os da galeria, do app Arquivos e de Resultados são buscados de novo na hora.
     private func guardarOriginais(_ id: UUID) {
         guard let r = historico.item(id)?.retomada,
-              r.tipo == .conversao || r.tipo == .loteConversao || r.tipo == .legenda else { return }
+              r.tipo == .conversao || r.tipo == .loteConversao || r.tipo == .legenda || r.tipo == .edicao else { return }
         let destino = Originais.pasta(id)
         for (k, n) in r.entradas.enumerated() {
             let temOrigem = (r.procedencias.flatMap { k < $0.count ? $0[k] : nil }) != nil
-            if temOrigem && r.tipo != .legenda { continue }        // a legenda fica com o vídeo à mão (o editor usa)
+            if temOrigem && r.tipo != .legenda && r.tipo != .edicao { continue }   // legenda e editor ficam com os vídeos à mão
             try? FileManager.default.createDirectory(at: destino, withIntermediateDirectories: true)
             try? FileManager.default.moveItem(at: entrada(id, n), to: destino.appendingPathComponent(n))
         }
@@ -567,6 +567,7 @@ final class Estudio {
         case .loteConversao: executarLote(id)
         case .drive: executarDrive(id)
         case .legenda: executarLegenda(id)
+        case .edicao: executarEdicao(id)
         }
     }
 
@@ -927,6 +928,61 @@ final class Estudio {
             self.concluir(id, arquivos: [saida.lastPathComponent], inicio: inicio,
                           duracao: PlanoConversao.duracao(info, opcoes))
         }
+    }
+
+    // --- editor de vídeo
+
+    /// Grava uma edição. As fontes são copiadas para o trabalho (as de Resultados continuam lá).
+    func gravarEdicao(fontes: [URL], projeto: ProjetoEdicao, opcoes: OpcoesConversao, modo: ModoGravacaoEdicao,
+                      titulo: String, base: String) {
+        var copias: [URL] = []
+        for u in fontes {
+            // ligação direta ao mesmo arquivo (não ocupa espaço de novo); se não der, copia
+            let c = Nuvem.semColisao(Self.pastaRecebidos.appendingPathComponent(u.lastPathComponent))
+            do {
+                do { try FileManager.default.linkItem(at: u, to: c) }
+                catch { try FileManager.default.copyItem(at: u, to: c) }
+                copias.append(c)
+            } catch {
+                aviso = "Não consegui preparar o vídeo \(u.lastPathComponent): \(error.localizedDescription)"; return
+            }
+        }
+        let tipo: Item.Tipo = modo == .audio ? .audio : .video
+        let id = novoItem(tipo, titulo, nuvem: false, mensagem: "Gravando a edição", base: base)
+        var p = projeto
+        p.fontes = copias.map { $0.lastPathComponent }
+        var r = Retomada(tipo: .edicao, entradas: [], nome: titulo, base: base, data: Date(), conversao: opcoes)
+        r.edicao = p
+        r.modoEdicao = modo
+        if prepararTrabalho(id, copias, r) { executarEdicao(id) }
+    }
+
+    private func executarEdicao(_ id: UUID) {
+        guard let r = historico.item(id)?.retomada, var projeto = r.edicao, let opcoes = r.conversao else { return }
+        let fontes = r.entradas.map { entrada(id, $0) }
+        projeto.fontes = r.entradas
+        let modo = r.modoEdicao ?? .video
+        let base = r.base ?? Self.base(r.nome)
+        let inicio = Date()
+        rodar(id, recomecar: true) {
+            try await self.aguardarVez(id)
+            guard let item = self.historico.item(id) else { return }
+            let saidas = try await ConversorEdicao.gravar(fontes: fontes, projeto: projeto, opcoes: opcoes, modo: modo,
+                                                          pasta: item.pasta, base: base) { p in
+                Task { @MainActor in self.etapa(id, "Gravando a edição", p) }
+            }
+            self.historico.atualizar(id, salvarAgora: false) { $0.retomada?.edicao = projeto }
+            self.concluir(id, arquivos: saidas.map { $0.lastPathComponent }, inicio: inicio, duracao: projeto.duracao)
+        }
+    }
+
+    /// "Editar de novo" de um resultado do editor: os vídeos guardados e os trechos usados.
+    func reabrirEdicao(_ id: UUID) -> (fontes: [URL], projeto: ProjetoEdicao)? {
+        guard let r = historico.item(id)?.reedicao, r.tipo == .edicao, var p = r.edicao else { return nil }
+        let urls = r.entradas.map { Originais.arquivo(id, $0) }
+        guard urls.allSatisfy({ FileManager.default.fileExists(atPath: $0.path) }) else { return nil }
+        p.fontes = r.entradas
+        return (urls, p)
     }
 
     // --- lote de vídeos (no iPhone): um trabalho só, com a galeria dos resultados

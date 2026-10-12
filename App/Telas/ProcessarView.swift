@@ -189,6 +189,7 @@ struct PainelArquivo: View {
     @State private var dataOriginal = Date()
     @State private var temVideo = false
     @State private var presetLegenda = PresetLegenda.todos[0].id
+    @State private var editor: AberturaEditor?
 
     private let notaData = "{data} e {datahora} = quando o áudio/vídeo foi gravado (se o arquivo não disser, a data do arquivo)."
 
@@ -204,7 +205,14 @@ struct PainelArquivo: View {
             if let d = formatarDuracao(duracao) {
                 Text(d).font(.subheadline).foregroundStyle(Tema.texto2)
             }
+            if temVideo {
+                Button { editor = AberturaEditor(fontes: [arquivo], nomes: [nome]) } label: {
+                    Label("Abrir no editor", systemImage: "timeline.selection").frame(maxWidth: .infinity).padding(.vertical, 4)
+                }
+                .buttonStyle(.glass)
+            }
         }
+        .fullScreenCover(item: $editor) { e in EditorVideoView(aberto: e) { fechar() } }
         .task {
             duracao = await AudioUtil.duracao(arquivo)
             dataOriginal = await DataMidia.ler(arquivo)
