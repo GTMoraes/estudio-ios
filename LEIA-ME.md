@@ -243,6 +243,15 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
   quadros à espera de áudio; agora cada trilha é encerrada assim que entrega tudo (`ConversorCompat.executar`), com
   limite de 15 s parado e de 120 s para fechar o arquivo. **Ajustar para o iPhone (sem perda):** vídeo HEVC com etiqueta
   `hev1` (Android) tem a etiqueta trocada por `hvc1` numa cópia, sem regravar (`Etiqueta.swift`, `Estudio.ajustarEtiqueta`).
+- 0.18.5: **teste do corte automático no iPhone** (Ajustes › Teste: corte automático). O CrisperWhisper turbo
+  convertido para Core ML (workflow `converter-crisper.yml`, pasta `testes/crisper`) fica em
+  "No meu iPhone › Estúdio › CrisperWhisper" junto com os .json do modelo. `App/Crisper/`: dicionário (BPE em
+  bytes, conferido contra o oficial em 101 frases), decodificação token a token com a lista de suprimidos e a
+  atenção das cabeças de alinhamento, o caminho longo oficial (janelas de 30 s a cada 26 s, 12 palavras de
+  contexto, descarte das palavras que a próxima janela reouve, reparo de laços), tempos das palavras pelo
+  método oficial (Viterbi com atenção + energia do mel; conferido contra o oficial) e a regra de corte
+  aprovada ("8-normal-v3"). Grava em "CrisperWhisper-testes" o relatório, palavras.json e o áudio cortado.
+  Ainda não portados: recomeço com temperatura para trechos vazios e recuperação de fim prematuro.
 - 0.14.0: o seletor de idioma ficou. Sem ele, um vídeo em outra língua seria tratado como português.
 
 ## Correções (0.11.1)
