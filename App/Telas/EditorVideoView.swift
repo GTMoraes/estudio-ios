@@ -150,6 +150,7 @@ struct EditorVideoView: View {
                 guard aparando == nil, movendo == nil else { return }
                 Task { await atualizarPrevia() }
             }
+            .onChange(of: selecionado) { _, _ in movendo = nil; aparando = nil; grudadoEm = nil }
             .onDisappear { player.pause() }
         }
         .preferredColorScheme(.dark)
@@ -273,34 +274,39 @@ struct EditorVideoView: View {
                     .background(.black.opacity(0.6), in: .rect(cornerRadius: 4)).padding(4)
             }
         }
+        .overlay(alignment: .top) { if sel { alcaMover(t) } }
         .scaleEffect(arrastando ? 1.04 : 1)
         .contentShape(Rectangle())
         .onTapGesture { selecionado = sel ? nil : t.id }
-        // segurar e arrastar: move o trecho pela linha do tempo
-        .highPriorityGesture(
-            LongPressGesture(minimumDuration: 0.35)
-                .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .global))
-                .onChanged { v in
-                    guard case .second(true, let d) = v else { return }
-                    if movendo?.id != t.id {
-                        registrar()
-                        movendo = (t.id, t.naLinha)
-                        selecionado = t.id
-                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    }
+
+    /// Pegador no meio do trecho selecionado: arrastar move o trecho pela linha do tempo.
+    /// (Só ele recebe o arrasto, para o resto do trecho continuar rolando a linha do tempo.)
+    private func alcaMover(_ t: TrechoEdicao) -> some View {
+        Image(systemName: "arrow.left.and.right")
+            .font(.caption.bold())
+            .foregroundStyle(.black)
+            .frame(width: 44, height: 24)
+            .background(Color.cyan, in: .capsule)
+            .padding(.top, 4)
+            .contentShape(Rectangle())
+            .onTapGesture {}   // tocar sem arrastar não tira a seleção
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                    .onChanged { g in
+                        if movendo?.id != t.id {
+                            registrar()
+                            movendo = (t.id, t.naLinha)
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        }
+                        guard let m = movendo else { return }
+                        mover(m.id, de: m.pos, delta: Double(g.translation.width / zoom))
                     }
-                    guard let m = movendo, let d else { return }
-                    mover(m.id, de: m.pos, delta: Double(d.translation.width / zoom))
-                }
-                .onEnded { _ in
-                    if movendo != nil { movendo = nil; grudadoEm = nil; Task { await atualizarPrevia() } }
-                }
-        )
-        .contextMenu {
-            Button("Mover para a esquerda", systemImage: "arrow.left") { trocar(t.id, -1) }.disabled(k == 0)
-            Button("Mover para a direita", systemImage: "arrow.right") { trocar(t.id, 1) }.disabled(k == trechos.count - 1)
-            Button("Duplicar", systemImage: "plus.square.on.square") { duplicar(t.id) }
-            Button("Remover", systemImage: "trash", role: .destructive) { remover(t.id) }.disabled(trechos.count < 2)
-        }
+                    .onEnded { _ in
+                        movendo = nil; grudadoEm = nil
+                        Task { await atualizarPrevia() }
+                    }
+            )
     }
 
     /// Alça para aparar o começo ou o fim do trecho. O começo "come" o vídeo pela esquerda (a borda
@@ -309,6 +315,8 @@ struct EditorVideoView: View {
         RoundedRectangle(cornerRadius: 3).fill(Color.yellow)
             .frame(width: 14, height: 92)
             .overlay(Image(systemName: inicio ? "chevron.compact.left" : "chevron.compact.right").font(.caption.bold()).foregroundStyle(.black))
+            .contentShape(Rectangle())
+            .onTapGesture {}   // tocar sem arrastar não tira a seleção
             .highPriorityGesture(
                 DragGesture(minimumDistance: 1, coordinateSpace: .global)
                     .onChanged { g in

@@ -263,6 +263,11 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
   trecho num arquivo, só o áudio (M4A) ou sem regravar (um trecho, sem velocidade/volume). O resultado guarda
   a edição: "Editar de novo" reabre com os vídeos guardados em Originais. As fontes entram no trabalho por
   ligação direta ao arquivo (sem ocupar espaço de novo).
+- 0.19.2: gestos do editor. Tocar num trecho seleciona (antes o "segurar" do mover e o menu de contexto
+  engoliam o toque); a linha do tempo rola com o dedo em cima dos trechos; mover passou para o **pegador
+  ciano** no topo do trecho selecionado (o menu de contexto saiu; Duplicar/Remover/etc. continuam na barra e
+  em "Ordem"); trocar a seleção zera o estado de arrasto preso; tocar no pegador ou nas alças sem arrastar não
+  tira a seleção.
 - 0.19.1: editor com **linha do tempo livre**: cada trecho tem posição própria (`TrechoEdicao.posicao`; projetos
   da 0.19.0 abrem com os trechos em sequência). Aparar o começo come o vídeo pela esquerda e deixa espaço vazio;
   as alças estendem além do recorte até o começo/fim do vídeo original; Remover deixa o espaço; segurar e arrastar
