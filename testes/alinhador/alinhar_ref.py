@@ -55,11 +55,11 @@ def viterbi(e, alvo, branco):
         m = np.maximum(np.maximum(f0, f1), f2)
         volta[t] = np.where(m == f0, 0, np.where(m == f1, 1, 2))
         a = m + e[t, rot]
-    s = S - 1 if S == 1 or a[S - 1] >= a[S - 2] else S - 2
+    s = int(S - 1 if S == 1 or a[S - 1] >= a[S - 2] else S - 2)
     estados = np.zeros(T, np.int64)
     for t in range(T - 1, -1, -1):
         estados[t] = s
-        s -= volta[t, s]
+        s -= int(volta[t, s])
     spans = [[-1, -1] for _ in range(L)]
     for t, s in enumerate(estados):
         if s % 2 == 1:

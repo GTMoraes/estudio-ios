@@ -32,7 +32,7 @@ class Saida(torch.nn.Module):
 
 t0 = time.time()
 with torch.no_grad():
-    tr = torch.jit.trace(Saida(modelo), torch.zeros(1, AMOSTRAS), strict=False)
+    tr = torch.jit.trace(Saida(modelo).eval(), torch.zeros(1, AMOSTRAS), strict=False)
 ml = ct.convert(tr, inputs=[ct.TensorType(name="audio", shape=(1, AMOSTRAS), dtype=np.float32)],
                 outputs=[ct.TensorType(name="logprobs", dtype=np.float32)],
                 convert_to="mlprogram", compute_precision=ct.precision.FLOAT16,
