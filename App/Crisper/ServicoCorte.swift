@@ -52,7 +52,11 @@ enum ModeloCrisper {
 
     /// Baixa o que falta. Arquivo já completo (tamanho certo) é mantido; arquivo pela metade continua
     /// da última parte inteira. progresso(0…1, mensagem).
-    static func baixar(progresso: @escaping @Sendable (Double, String) -> Void) async throws {
+    /// Serve para o CrisperWhisper e para o alinhador: `origem` no cdn, `pasta` no iPhone.
+    static func baixar(de origem: URL = ModeloCrisper.base, para pasta: URL = ModeloCrisper.pasta, nome: String = "o modelo",
+                       progresso: @escaping @Sendable (Double, String) -> Void) async throws {
+        let base = origem
+        let marcaIncompleto = pasta.appendingPathComponent(".incompleto")
         let (dados, resp) = try await URLSession.shared.data(from: base.appendingPathComponent("manifesto.json"))
         guard (resp as? HTTPURLResponse)?.statusCode == 200 else {
             throw ErroApp("Não achei a lista do modelo no servidor (manifesto.json).")
@@ -92,7 +96,7 @@ enum ModeloCrisper {
                     try fh.write(contentsOf: d)
                     try? fm.removeItem(at: arq)
                     let agora = Int64(try fh.offset())
-                    progresso(Double(feitos + agora) / Double(total), "Baixando o modelo")
+                    progresso(Double(feitos + agora) / Double(total), "Baixando \(nome)")
                 }
                 try fh.close()
             } catch {
@@ -145,16 +149,23 @@ final class BaixaCrisper {
 
     func iniciar() {
         guard tarefa == nil else { return }
-        progresso = 0; mensagem = "Baixando o modelo"
+        progresso = 0; mensagem = "Baixando"
         tarefa = Task {
             do {
-                try await ModeloCrisper.baixar { p, msg in
+                let aviso: @Sendable (Double, String) -> Void = { p, msg in
                     Task { @MainActor in
                         guard BaixaCrisper.shared.tarefa != nil else { return }
                         BaixaCrisper.shared.progresso = p; BaixaCrisper.shared.mensagem = msg
                     }
                 }
-                mensagem = "Modelo pronto."
+                if !ModeloCrisper.pronto {
+                    try await ModeloCrisper.baixar(nome: "o CrisperWhisper", progresso: aviso)
+                }
+                if !ModeloAlinhador.pronto {
+                    try await ModeloCrisper.baixar(de: ModeloAlinhador.base, para: ModeloAlinhador.pasta,
+                                                   nome: "o alinhador", progresso: aviso)
+                }
+                mensagem = "Modelos prontos."
             } catch let error where error is CancellationError || (error as? URLError)?.code == .cancelled || Task.isCancelled {
                 mensagem = "Download pausado. Toque em Baixar para continuar de onde parou."
             } catch {
@@ -180,6 +191,8 @@ enum TranscricoesGuardadas {
         var palavras: [PalavraTempo]
         var duracao: Double
         var criada: Date
+        var alinhadas: [PalavraTempo]? = nil      // tempos do alinhador (nil = ainda não alinhado)
+        var versaoAlinhador: Int? = nil
     }
 
     static var pasta: URL {
@@ -226,12 +239,12 @@ enum TranscricoesGuardadas {
 
 // MARK: - proposta de corte
 
-/// O que a regra aprovada ("8-normal-v3") faria num arquivo: o que fica e o que sai (tempos no arquivo).
+/// O que a regra v4 faria num arquivo: o que fica e o que sai (tempos no arquivo), com o motivo.
 struct PropostaCorte: Codable {
     struct Faixa: Codable {
         var i: Double
         var f: Double
-        var texto: String             // o que sai ali ("[UH]", "esp-", "do do"…) ou "pausa"
+        var texto: String             // motivo: "pausa", "som: [UH]", "palavra cortada: esp-", "repetição: do do"
     }
     var duracao: Double
     var texto: String
@@ -239,6 +252,8 @@ struct PropostaCorte: Codable {
     var tirar: [Faixa]
     var reparos = 0, recomecos = 0, fimRecuperado = 0
     var transcricaoGuardada = false
+    var alinhado = false                // tempos do alinhador (senão, os do CrisperWhisper)
+    var pastaDiagnostico: String?
 }
 
 /// Transcreve (ou pega a transcrição guardada) e aplica a regra de corte. O modelo fica carregado
@@ -282,29 +297,57 @@ final class ServicoCorte: @unchecked Sendable {
             TranscricoesGuardadas.gravar(g, para: url)
             guardada = g
         }
-        guard let g = guardada else { throw ErroApp("Não consegui transcrever.") }
-        progresso("Calculando os cortes", nil)
-        let manter = CorteAutomatico.trechos(g.palavras, audio: audio)
-        let dur = Double(audio.count) / 16000
-        var tirar: [PropostaCorte.Faixa] = []
-        func faixa(_ a: Double, _ b: Double) {
-            guard b - a > 0.02 else { return }
-            let ditas = g.palavras.filter { w in
-                guard let i = w.i, let f = w.f else { return false }
-                let meio = (i + f) / 2
-                return meio >= a && meio < b
-            }.map { $0.p }
-            tirar.append(.init(i: a, f: b, texto: ditas.isEmpty ? "pausa" : ditas.joined(separator: " ")))
+        guard var g = guardada else { throw ErroApp("Não consegui transcrever.") }
+        // tempos das palavras pelo alinhador (guardados junto da transcrição)
+        var palavras = g.palavras
+        var alinhado = false
+        if let a = g.alinhadas, g.versaoAlinhador == Alinhador.versao {
+            palavras = a; alinhado = true
+        } else if ModeloAlinhador.pronto {
+            progresso("Alinhando as palavras", 0)
+            liberar()                                  // o CrisperWhisper não é mais preciso: libera a memória
+            let ws = g.palavras
+            let trabalho = Task.detached(priority: .userInitiated) {
+                try Alinhador().alinhar(ws, audio: audio) { p in progresso("Alinhando as palavras", p) }
+            }
+            palavras = try await withTaskCancellationHandler { try await trabalho.value } onCancel: { trabalho.cancel() }
+            alinhado = true
+            g.alinhadas = palavras; g.versaoAlinhador = Alinhador.versao
+            TranscricoesGuardadas.gravar(g, para: url)
         }
-        var antes = 0.0
-        for t in manter { faixa(antes, t.i); antes = t.f }
-        faixa(antes, dur)
-        var p = PropostaCorte(duracao: dur, texto: g.texto, manter: manter, tirar: tirar)
+        progresso("Calculando os cortes", nil)
+        let dur = Double(audio.count) / 16000
+        let cortes = CorteAutomatico.cortes(palavras, audio: audio)
+        let manter = CorteAutomatico.manter(cortes, duracao: dur)
+        var p = PropostaCorte(duracao: dur, texto: g.texto, manter: manter,
+                              tirar: cortes.map { .init(i: $0.i, f: $0.f, texto: $0.motivo) })
         p.reparos = r?.reparos ?? 0
         p.recomecos = r?.recomecos ?? 0
         p.fimRecuperado = r?.fimRecuperado ?? 0
         p.transcricaoGuardada = r == nil
+        p.alinhado = alinhado
+        p.pastaDiagnostico = Self.diagnostico(p, original: g.palavras, usadas: palavras, url: url)
         return p
+    }
+
+    /// Grava em "No meu iPhone › Estúdio › CrisperWhisper-testes › <data> <nome>" as palavras (tempos do
+    /// CrisperWhisper e do alinhador) e a lista do que saiu e por quê. Devolve o nome da pasta.
+    static func diagnostico(_ p: PropostaCorte, original: [PalavraTempo], usadas: [PalavraTempo], url: URL) -> String? {
+        let fmt = DateFormatter(); fmt.dateFormat = "yyyy-MM-dd HH.mm.ss"
+        let nome = fmt.string(from: Date()) + " " + String(url.deletingPathExtension().lastPathComponent.prefix(40))
+        let pasta = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("CrisperWhisper-testes", isDirectory: true)
+            .appendingPathComponent(nome, isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: pasta, withIntermediateDirectories: true)
+            struct Palavras: Codable { var crisperwhisper: [PalavraTempo]; var usadas: [PalavraTempo]; var alinhado: Bool }
+            let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
+            try enc.encode(Palavras(crisperwhisper: original, usadas: usadas, alinhado: p.alinhado))
+                .write(to: pasta.appendingPathComponent("palavras.json"))
+            try relatorio(p, nome: url.lastPathComponent).write(to: pasta.appendingPathComponent("cortes.txt"),
+                                                                 atomically: true, encoding: .utf8)
+            return nome
+        } catch { return nil }
     }
 
     /// Texto do que saiu, para acompanhar o áudio cortado.
@@ -313,9 +356,10 @@ final class ServicoCorte: @unchecked Sendable {
         let fica = p.manter.reduce(0) { $0 + ($1.f - $1.i) }
         var linhas = [
             "Corte automático de \(nome)",
-            "Fica \(tempo(fica)) de \(tempo(p.duracao)) · \(p.tirar.count) cortes",
+            "Fica \(tempo(fica)) de \(tempo(p.duracao)) · \(p.tirar.count) cortes · regra v4 · tempos "
+                + (p.alinhado ? "do alinhador" : "do CrisperWhisper (alinhador ausente)"),
             "",
-            "O que saiu (tempos no original):",
+            "O que saiu (tempos no original) e por quê:",
         ]
         linhas += p.tirar.map { "\(tempo($0.i)) a \(tempo($0.f))  \($0.texto)" }
         linhas += ["", "Transcrição completa (tudo o que foi dito):", p.texto]

@@ -48,6 +48,8 @@ struct EditorVideoView: View {
     @State private var cortando: String?                   // corte automático em andamento
     @State private var progressoCorte: Double?
     @State private var tarefaCorte: Task<Void, Never>?
+    @State private var previaCortada = true                // a prévia pula as marcas vermelhas
+    @State private var cortesAlinhados = true              // os tempos vieram do alinhador
     @State private var grudadoEm: Double?
     @State private var espacoTocado: Espaco?
     @State private var versaoPrevia = 0
@@ -150,6 +152,12 @@ struct EditorVideoView: View {
                 guard tocando, !rolando else { return }
                 let t = CMTimeGetSeconds(player.currentTime())
                 if t.isFinite {
+                    if previaCortada, let fim = saltoEm(t), fim - t > 0.03 {
+                        if fim >= total - 0.02 { tocando = false; player.pause(); tempo = total; return }
+                        buscar(fim); tempo = fim
+                        posicao.scrollTo(x: CGFloat(fim) * zoom)
+                        return
+                    }
                     tempo = min(t, total)
                     posicao.scrollTo(x: CGFloat(tempo) * zoom)
                     if t >= total - 0.02 { tocando = false; player.pause() }
@@ -750,6 +758,7 @@ struct EditorVideoView: View {
             defer { cortando = nil; progressoCorte = nil; tarefaCorte = nil; ServicoCorte.shared.liberar() }
             do {
                 var novas: [CorteProposto] = []
+                var alinhou = true
                 for (n, k) in usadas.enumerated() where urls.indices.contains(k) {
                     let rotulo = usadas.count > 1 ? "Arquivo \(n + 1) de \(usadas.count): " : ""
                     let prop = try await ServicoCorte.shared.propor(urls[k]) { msg, p in
@@ -758,8 +767,10 @@ struct EditorVideoView: View {
                         }
                     }
                     novas += prop.tirar.map { CorteProposto(fonte: k, i: $0.i, f: $0.f, texto: $0.texto) }
+                    alinhou = alinhou && prop.alinhado
                 }
                 let atuais = trechos
+                cortesAlinhados = alinhou
                 cortes = novas.filter { c in atuais.contains { $0.fonte == c.fonte && $0.fim > c.i + 0.005 && $0.inicio < c.f - 0.005 } }
                 if cortes.isEmpty { aviso = "Não achei nada para cortar." }
             } catch is CancellationError {
@@ -767,6 +778,21 @@ struct EditorVideoView: View {
                 if !Task.isCancelled { aviso = "Corte automático: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)" }
             }
         }
+    }
+
+    /// Na prévia cortada: se `t` (linha do tempo) cai numa marca vermelha, onde ela termina.
+    private func saltoEm(_ t: Double) -> Double? {
+        guard !cortes.isEmpty else { return nil }
+        for tr in trechos where t >= tr.naLinha && t < tr.fimNaLinha {
+            let v = max(0.1, tr.velocidade)
+            let fonteT = tr.inicio + (t - tr.naLinha) * v
+            var fim: Double?
+            for c in cortes where !c.manter && c.fonte == tr.fonte && fonteT >= c.i && fonteT < c.f {
+                fim = max(fim ?? 0, min(c.f, tr.fim))
+            }
+            if let f = fim { return tr.naLinha + (f - tr.inicio) / v }
+        }
+        return nil
     }
 
     /// Marcas vermelhas dos cortes propostos dentro de um trecho (toque = manter aquele pedaço).
@@ -811,10 +837,14 @@ struct EditorVideoView: View {
                 Label("\(ativos.count) cortes · tira \(String(format: "%.1f", tira).replacingOccurrences(of: ".", with: ",")) s",
                       systemImage: "scissors").font(.footnote.bold())
                 Spacer()
+                Text(cortesAlinhados ? "tempos do alinhador" : "sem alinhador")
+                    .font(.caption2).foregroundStyle(cortesAlinhados ? Tema.texto2 : Color.orange)
             }
             Text("Vermelho sai. Toque numa marca para manter aquele pedaço (fica tracejada).")
                 .font(.caption2).foregroundStyle(Tema.texto2)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            Toggle("Prévia já cortada (o play pula o vermelho)", isOn: $previaCortada)
+                .font(.footnote)
             HStack(spacing: 8) {
                 Button("Descartar") { cortes = [] }
                 Spacer()

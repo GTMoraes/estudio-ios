@@ -4,6 +4,7 @@ import SwiftUI
 struct CartaoCorteAutomatico: View {
     @State private var baixa = BaixaCrisper.shared
     @State private var pronto = ModeloCrisper.pronto
+    @State private var alinhador = ModeloAlinhador.pronto
     @State private var espacoModelo: Int64 = 0
     @State private var guardadas = 0
     @State private var espacoGuardadas: Int64 = 0
@@ -11,17 +12,20 @@ struct CartaoCorteAutomatico: View {
 
     var body: some View {
         Cartao(titulo: "Corte automático", icone: "scissors") {
-            Label(pronto ? "Modelo pronto (CrisperWhisper)" : "Modelo ainda não está no iPhone (1,2 GB)",
+            Label(pronto ? "CrisperWhisper pronto (o que foi dito)" : "CrisperWhisper ainda não está no iPhone (1,2 GB)",
                   systemImage: pronto ? "checkmark.circle.fill" : "arrow.down.circle")
                 .foregroundStyle(pronto ? .green : Tema.texto2)
-            Text("Roda na GPU do iPhone, sem internet. Cada uso começa carregando o modelo (cerca de 30 s). O modelo fica em “No meu iPhone › Estúdio › CrisperWhisper” e continua lá quando o app é atualizado.")
+            Label(alinhador ? "Alinhador pronto (onde cada palavra começa e termina)" : "Alinhador ainda não está no iPhone (630 MB)",
+                  systemImage: alinhador ? "checkmark.circle.fill" : "arrow.down.circle")
+                .foregroundStyle(alinhador ? .green : Tema.texto2)
+            Text("Rodam na GPU do iPhone, sem internet. Sem o alinhador o corte funciona, mas pode comer começo e fim de palavra. Ficam em “No meu iPhone › Estúdio › CrisperWhisper” e “› Alinhador”, e continuam lá quando o app é atualizado. Cada corte grava um diagnóstico em “› CrisperWhisper-testes”.")
                 .font(.footnote).foregroundStyle(Tema.texto2)
             if let p = baixa.progresso { ProgressView(value: p).tint(Tema.acento) }
             if let m = baixa.mensagem { Text(m).font(.footnote).foregroundStyle(Tema.texto2) }
             if baixa.baixando {
                 Button("Pausar o download", role: .cancel) { baixa.cancelar() }.buttonStyle(.glass)
-            } else if !pronto {
-                BotaoPrincipal(titulo: "Baixar o modelo", icone: "arrow.down.circle.fill") { baixa.iniciar() }
+            } else if !pronto || !alinhador {
+                BotaoPrincipal(titulo: "Baixar o que falta", icone: "arrow.down.circle.fill") { baixa.iniciar() }
             }
             Divider().overlay(Color.white.opacity(0.1))
             Text(guardadas == 0 ? "Nenhuma transcrição guardada."
@@ -37,18 +41,18 @@ struct CartaoCorteAutomatico: View {
                     }
                 }
                 Spacer()
-                if pronto && !baixa.baixando {
-                    Button("Apagar modelo", role: .destructive) {
-                        confirmar = Confirmacao(titulo: "Apagar o modelo do corte automático?",
-                                                mensagem: "Será preciso baixar 1,2 GB de novo para usar o corte automático.") {
-                            ModeloCrisper.apagar(); atualizar()
+                if (pronto || alinhador) && !baixa.baixando {
+                    Button("Apagar modelos", role: .destructive) {
+                        confirmar = Confirmacao(titulo: "Apagar os modelos do corte automático?",
+                                                mensagem: "Será preciso baixar de novo (1,2 GB + 630 MB) para usar o corte automático.") {
+                            ModeloCrisper.apagar(); ModeloAlinhador.apagar(); atualizar()
                         }
                     }
                 }
             }
             .font(.footnote)
             if espacoModelo > 0 {
-                Text("Modelo: \(ByteCountFormatter.string(fromByteCount: espacoModelo, countStyle: .file))")
+                Text("Modelos: \(ByteCountFormatter.string(fromByteCount: espacoModelo, countStyle: .file))")
                     .font(.caption).foregroundStyle(Tema.texto2)
             }
         }
@@ -59,7 +63,8 @@ struct CartaoCorteAutomatico: View {
 
     private func atualizar() {
         pronto = ModeloCrisper.pronto
-        espacoModelo = ModeloCrisper.tamanhoEmDisco()
+        alinhador = ModeloAlinhador.pronto
+        espacoModelo = ModeloCrisper.tamanhoEmDisco() + ModeloAlinhador.tamanhoEmDisco()
         guardadas = TranscricoesGuardadas.quantidade()
         espacoGuardadas = TranscricoesGuardadas.tamanhoEmDisco()
     }

@@ -263,6 +263,19 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
   trecho num arquivo, só o áudio (M4A) ou sem regravar (um trecho, sem velocidade/volume). O resultado guarda
   a edição: "Editar de novo" reabre com os vídeos guardados em Originais. As fontes entram no trabalho por
   ligação direta ao arquivo (sem ocupar espaço de novo).
+- 0.21.0: **regra v4 + alinhador**. No vídeo de 13 min os cortes comiam palavras: os tempos do próprio
+  CrisperWhisper "espremem" palavras em fala rápida ("algumas" com 0,08 s) e a regra antiga tratava o buraco como
+  pausa. Regra v4 (`CorteAutomatico.cortes`): pausa só onde o áudio está quieto (≥ 0,30 s abaixo do piso + 10 dB;
+  ficam 0,13 s antes e 0,03 s depois); "som", "palavra cortada" e "repetição" como antes, agora com o motivo.
+  Alinhador (`App/Crisper/Alinhador.swift`): wav2vec2 large português (jonatasgrosman, o do WhisperX) em Core ML,
+  janelas de 24 s (20 + 2 + 2), CTC Viterbi por grupos de ~20 s, cada grupo começa onde o anterior terminou;
+  tempos guardados junto da transcrição (`alinhadas`, `Alinhador.versao`). Sem o alinhador no iPhone, usa os
+  tempos do CrisperWhisper. Conversão: `testes/alinhador/converter.py` + workflow `converter-alinhador.yml`
+  (artefato `alinhador-coreml` → "No meu iPhone › Estúdio › Alinhador"); `alinhar_ref.py` é o mesmo algoritmo em
+  numpy. Download pelo app: `ModeloCrisper.baixar(de:para:)` genérico, cdn.frx9.com/modelos/alinhador/
+  (`scripts/preparar-modelo-cdn.py`). Editor: a prévia pula as marcas vermelhas (chave "Prévia já cortada"),
+  marcas mostram o motivo, painel diz se os tempos são do alinhador. Cada corte grava diagnóstico em
+  CrisperWhisper-testes/<data> <nome>/ (palavras.json com os tempos dos dois, cortes.txt).
 - 0.20.0: **corte automático** (CrisperWhisper 2.0 turbo na GPU, regra "8-normal-v3"). `App/Crisper/ServicoCorte.swift`:
   `ModeloCrisper` (modelo em Documents/CrisperWhisper; usa o que já estiver lá; se faltar, baixa de
   cdn.frx9.com/modelos/crisperwhisper/ pelo `manifesto.json`, partes de 19 MB, continua de onde parou, SHA-256 por
