@@ -165,8 +165,11 @@ final class Nuvem: @unchecked Sendable {
     /// valida: a nuvem perguntou ao Instagram se a sessão ainda vale (nil = não deu para saber).
     struct EstadoInstagram { var temConta: Bool; var podeGerenciar: Bool; var atualizado: Date?; var valida: Bool? }
 
-    func estadoInstagram() async throws -> EstadoInstagram {
-        let r = try await objeto("api/instagram/status")
+    func estadoInstagram() async throws -> EstadoInstagram { try await estadoConta("instagram") }
+
+    /// Conta de um site (cookies da sessão guardados só na nuvem): "instagram" ou "reddit".
+    func estadoConta(_ site: String) async throws -> EstadoInstagram {
+        let r = try await objeto("api/\(site)/status")
         return EstadoInstagram(temConta: r["has_cookies"] as? Bool ?? false,
                                podeGerenciar: r["can_manage"] as? Bool ?? false,
                                atualizado: (r["updated"] as? Double).map { Date(timeIntervalSince1970: $0) },
@@ -179,6 +182,14 @@ final class Nuvem: @unchecked Sendable {
 
     func removerInstagram() async throws {
         try await pedir("api/instagram/cookies", metodo: "DELETE")
+    }
+
+    func enviarCookies(_ site: String, _ cookies: [[String: Any]]) async throws {
+        try await pedir("api/\(site)/cookies", metodo: "POST", json: ["cookies": cookies])
+    }
+
+    func removerConta(_ site: String) async throws {
+        try await pedir("api/\(site)/cookies", metodo: "DELETE")
     }
 
     func apagarPost(_ id: String) async {

@@ -263,6 +263,16 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
   trecho num arquivo, só o áudio (M4A) ou sem regravar (um trecho, sem velocidade/volume). O resultado guarda
   a edição: "Editar de novo" reabre com os vídeos guardados em Originais. As fontes entram no trabalho por
   ligação direta ao arquivo (sem ocupar espaço de novo).
+- 0.21.2: **conta do Reddit**. Desde 2025 o yt-dlp (old.reddit) pede conta e a página nova tem verificação
+  anti-robô (8 KB sem o post). Ajustes › Reddit (mesmo cartão do Instagram, agora genérico: `SiteConta`,
+  `CartaoConta`): login na página do Reddit dentro do app, "Concluir" manda só os cookies (exige `reddit_session`).
+  Nuvem: `/api/reddit/status|cookies` (RD_COOKIES=/data/reddit-cookies.txt; validade pelo old.reddit.com/prefs), yt-dlp e
+  gallery-dl usam os cookies do Reddit em links do Reddit, mensagens de erro próprias.
+- 0.21.1: alinhador convertido em float16 dava -infinito/NaN (o log-softmax em float16). O modelo agora devolve o
+  logit cru (`logits`) e o log-softmax é feito em float32 (no app e no `converter.py`). O workflow testa três
+  variantes (float16, misto com normalizações em float32, float32) e escolhe a menor que bate com o PyTorch
+  (média < 5 ms, máx < 60 ms nas fronteiras das palavras). Resultado: float16 e misto deram NaN (em ~1/3 das janelas); float32 escolhido (1,2 GB): 685 de 688 fronteiras idênticas ao PyTorch, média 0,1 ms. Se o alinhador falhar no iPhone, o corte segue com os
+  tempos do CrisperWhisper (painel: "sem alinhador"; motivo no Diagnóstico).
 - 0.21.0: **regra v4 + alinhador**. No vídeo de 13 min os cortes comiam palavras: os tempos do próprio
   CrisperWhisper "espremem" palavras em fala rápida ("algumas" com 0,08 s) e a regra antiga tratava o buraco como
   pausa. Regra v4 (`CorteAutomatico.cortes`): pausa só onde o áudio está quieto (≥ 0,30 s abaixo do piso + 10 dB;

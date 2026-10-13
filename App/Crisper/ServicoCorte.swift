@@ -310,10 +310,18 @@ final class ServicoCorte: @unchecked Sendable {
             let trabalho = Task.detached(priority: .userInitiated) {
                 try Alinhador().alinhar(ws, audio: audio) { p in progresso("Alinhando as palavras", p) }
             }
-            palavras = try await withTaskCancellationHandler { try await trabalho.value } onCancel: { trabalho.cancel() }
-            alinhado = true
-            g.alinhadas = palavras; g.versaoAlinhador = Alinhador.versao
-            TranscricoesGuardadas.gravar(g, para: url)
+            do {
+                palavras = try await withTaskCancellationHandler { try await trabalho.value } onCancel: { trabalho.cancel() }
+                alinhado = true
+                g.alinhadas = palavras; g.versaoAlinhador = Alinhador.versao
+                TranscricoesGuardadas.gravar(g, para: url)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // alinhador falhou: segue com os tempos do CrisperWhisper (o painel avisa "sem alinhador")
+                palavras = g.palavras
+                Diagnostico.log("alinhador falhou: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)")
+            }
         }
         progresso("Calculando os cortes", nil)
         let dur = Double(audio.count) / 16000
@@ -357,7 +365,7 @@ final class ServicoCorte: @unchecked Sendable {
         var linhas = [
             "Corte automático de \(nome)",
             "Fica \(tempo(fica)) de \(tempo(p.duracao)) · \(p.tirar.count) cortes · regra v4 · tempos "
-                + (p.alinhado ? "do alinhador" : "do CrisperWhisper (alinhador ausente)"),
+                + (p.alinhado ? "do alinhador" : "do CrisperWhisper (alinhador ausente ou falhou)"),
             "",
             "O que saiu (tempos no original) e por quê:",
         ]

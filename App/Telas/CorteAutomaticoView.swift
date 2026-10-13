@@ -15,7 +15,7 @@ struct CartaoCorteAutomatico: View {
             Label(pronto ? "CrisperWhisper pronto (o que foi dito)" : "CrisperWhisper ainda não está no iPhone (1,2 GB)",
                   systemImage: pronto ? "checkmark.circle.fill" : "arrow.down.circle")
                 .foregroundStyle(pronto ? .green : Tema.texto2)
-            Label(alinhador ? "Alinhador pronto (onde cada palavra começa e termina)" : "Alinhador ainda não está no iPhone (630 MB)",
+            Label(alinhador ? "Alinhador pronto (onde cada palavra começa e termina)" : "Alinhador ainda não está no iPhone (1,2 GB)",
                   systemImage: alinhador ? "checkmark.circle.fill" : "arrow.down.circle")
                 .foregroundStyle(alinhador ? .green : Tema.texto2)
             Text("Rodam na GPU do iPhone, sem internet. Sem o alinhador o corte funciona, mas pode comer começo e fim de palavra. Ficam em “No meu iPhone › Estúdio › CrisperWhisper” e “› Alinhador”, e continuam lá quando o app é atualizado. Cada corte grava um diagnóstico em “› CrisperWhisper-testes”.")
@@ -44,7 +44,7 @@ struct CartaoCorteAutomatico: View {
                 if (pronto || alinhador) && !baixa.baixando {
                     Button("Apagar modelos", role: .destructive) {
                         confirmar = Confirmacao(titulo: "Apagar os modelos do corte automático?",
-                                                mensagem: "Será preciso baixar de novo (1,2 GB + 630 MB) para usar o corte automático.") {
+                                                mensagem: "Será preciso baixar de novo (1,2 GB + 1,2 GB) para usar o corte automático.") {
                             ModeloCrisper.apagar(); ModeloAlinhador.apagar(); atualizar()
                         }
                     }

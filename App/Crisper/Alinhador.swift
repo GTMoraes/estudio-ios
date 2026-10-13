@@ -8,7 +8,7 @@ import CoreML
 /// baixado de cdn.frx9.com/modelos/alinhador/.
 enum ModeloAlinhador {
     static let base = URL(string: "https://cdn.frx9.com/modelos/alinhador/")!
-    static let tamanhoAproximado: Int64 = 640_000_000
+    static let tamanhoAproximado: Int64 = 1_200_000_000
 
     static var pasta: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -94,7 +94,7 @@ final class Alinhador: @unchecked Sendable {
             for k in 0..<Self.amostras { p[k * passo] = k < n ? (audio[i0 + k] - m) / desvio : 0 }
         }
         let r = try modelo.prediction(from: MLDictionaryFeatureProvider(dictionary: ["audio": MLFeatureValue(multiArray: entrada)]))
-        guard let lp = r.featureValue(for: "logprobs")?.multiArrayValue, lp.shape.count == 3 else {
+        guard let lp = r.featureValue(for: "logits")?.multiArrayValue, lp.shape.count == 3 else {
             throw ErroApp("O alinhador não devolveu a saída esperada.")
         }
         let T = lp.shape[1].intValue, V = lp.shape[2].intValue
@@ -108,6 +108,16 @@ final class Alinhador: @unchecked Sendable {
             lp.withUnsafeBufferPointer(ofType: Float.self) { p in
                 for t in 0..<T { for v in 0..<V { out[t][v] = p[t * st[1] + v * st[2]] } }
             }
+        }
+        // log-softmax em float32 (no modelo, em float16, dava -infinito)
+        for t in 0..<T {
+            var m = -Float.infinity
+            for v in 0..<V { m = max(m, out[t][v]) }
+            guard m.isFinite else { throw ErroApp("O alinhador devolveu valores inválidos (NaN) neste iPhone.") }
+            var soma: Float = 0
+            for v in 0..<V { soma += exp(out[t][v] - m) }
+            let l = m + log(soma)
+            for v in 0..<V { out[t][v] -= l }
         }
         return out
     }
