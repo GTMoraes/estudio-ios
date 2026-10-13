@@ -174,7 +174,7 @@ struct PainelArquivo: View {
     var fechar: () -> Void
 
     enum Acao: String, CaseIterable, Identifiable {
-        case converter = "Converter", voz = "Tratar voz", transcrever = "Transcrever", legendar = "Legendar"
+        case converter = "Converter", voz = "Tratar voz", transcrever = "Transcrever", legendar = "Legendar", cortar = "Cortar"
         var id: String { rawValue }
     }
 
@@ -225,6 +225,36 @@ struct PainelArquivo: View {
         .pickerStyle(.segmented)
 
         switch acao {
+        case .cortar:
+            Cartao(titulo: "Corte automático", icone: "scissors") {
+                Text("Tira os “é…”, “hã”, pigarros, palavras cortadas e repetições, com o CrisperWhisper na GPU do iPhone (sem internet). Os cortes caem onde o som já acabou.")
+                    .font(.footnote).foregroundStyle(Tema.texto2)
+                if !ModeloCrisper.pronto {
+                    Label("Falta o modelo: baixe em Ajustes › Corte automático (1,2 GB).", systemImage: "arrow.down.circle")
+                        .font(.footnote).foregroundStyle(.orange)
+                } else if temVideo {
+                    Text("Abre no editor com os cortes propostos marcados em vermelho. Toque numa marca para manter aquele pedaço e depois em “Aplicar cortes”.")
+                        .font(.footnote).foregroundStyle(Tema.texto2)
+                } else {
+                    Text("“Cortar e gravar” já grava o áudio cortado e um texto com o que saiu. “Revisar no editor” mostra os cortes antes.")
+                        .font(.footnote).foregroundStyle(Tema.texto2)
+                }
+            }
+            if temVideo {
+                BotaoPrincipal(titulo: "Abrir no editor e propor os cortes", icone: "timeline.selection",
+                               desativado: !ModeloCrisper.pronto) {
+                    editor = AberturaEditor(fontes: [arquivo], nomes: [nome], cortarAoAbrir: true)
+                }
+            } else {
+                BotaoPrincipal(titulo: "Cortar e gravar", icone: "scissors", desativado: !ModeloCrisper.pronto) {
+                    estudio.cortarAudio(arquivo, nome: nome, data: dataOriginal); fechar()
+                }
+                Button { editor = AberturaEditor(fontes: [arquivo], nomes: [nome], cortarAoAbrir: true) } label: {
+                    Label("Revisar no editor", systemImage: "timeline.selection").frame(maxWidth: .infinity).padding(.vertical, 6)
+                }
+                .buttonStyle(.glass)
+                .disabled(!ModeloCrisper.pronto)
+            }
         case .converter:
             // "Editar novamente": abre com os ajustes que foram usados
             PainelConverter(arquivo: arquivo, nome: nome, fechar: fechar, inicial: estudio.ajustesGuardados[arquivo.path])

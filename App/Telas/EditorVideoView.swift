@@ -10,6 +10,7 @@ struct AberturaEditor: Identifiable {
     var fontes: [URL]
     var nomes: [String]
     var projeto: ProjetoEdicao? = nil
+    var cortarAoAbrir = false          // corte automático: já propõe os cortes ao abrir
 }
 
 struct EditorVideoView: View {
@@ -42,6 +43,11 @@ struct EditorVideoView: View {
     @State private var deslocLinha: CGFloat = 0           // rolagem da linha do tempo (pontos)
     @State private var larguraLinha: CGFloat = 0
     @State private var pegaFixo: CGFloat?                 // posição do pegador enquanto arrasta
+    @State private var soAudio = false                     // só áudios (sem vídeo): grava só o áudio
+    @State private var cortes: [CorteProposto] = []        // corte automático: o que a regra tiraria
+    @State private var cortando: String?                   // corte automático em andamento
+    @State private var progressoCorte: Double?
+    @State private var tarefaCorte: Task<Void, Never>?
     @State private var grudadoEm: Double?
     @State private var espacoTocado: Espaco?
     @State private var versaoPrevia = 0
@@ -71,6 +77,7 @@ struct EditorVideoView: View {
                 previa
                 barraTempo
                 linhaDoTempo
+                if !cortes.isEmpty { painelCortes }
                 if painelVolume { painelDeVolume }
                 ferramentas
             }
@@ -113,7 +120,7 @@ struct EditorVideoView: View {
                 Text("Espaço de \(String(format: "%.1f", (espacoTocado?.fim ?? 0) - (espacoTocado?.inicio ?? 0))) s: na gravação vira tela preta e silêncio.")
             }
             .sheet(isPresented: $gravar) {
-                FolhaGravarEdicao(fontes: fontes, nomes: nomes, trechos: trechos) { opcoes, modo, base in
+                FolhaGravarEdicao(fontes: fontes, nomes: nomes, trechos: trechos, soAudio: soAudio) { opcoes, modo, base in
                     let p = ProjetoEdicao(fontes: fontes.map { $0.lastPathComponent }, trechos: trechos)
                     estudio.gravarEdicao(fontes: fontes, projeto: p, opcoes: opcoes, modo: modo,
                                          titulo: (nomes.first ?? "Edição") + " (editado)", base: base)
@@ -156,7 +163,7 @@ struct EditorVideoView: View {
             }
             .onChange(of: selecionado) { _, _ in movendo = nil; aparando = nil; grudadoEm = nil; pegaFixo = nil }
             .onChange(of: alvoVolume) { _, _ in sincronizarVolume() }
-            .onDisappear { player.pause() }
+            .onDisappear { player.pause(); tarefaCorte?.cancel() }
         }
         .preferredColorScheme(.dark)
     }
@@ -167,6 +174,9 @@ struct EditorVideoView: View {
         ZStack {
             CamadaPlayer(player: player)
             if !carregado { ProgressView() }
+            if soAudio && carregado {
+                Image(systemName: "waveform").font(.system(size: 54)).foregroundStyle(Tema.texto2).allowsHitTesting(false)
+            }
             if let c = convertendo {
                 VStack(spacing: 8) {
                     Text(c).font(.footnote).multilineTextAlignment(.center)
@@ -174,6 +184,16 @@ struct EditorVideoView: View {
                 }
                 .padding(14)
                 .background(.black.opacity(0.75), in: .rect(cornerRadius: 14))
+            }
+            if let c = cortando {
+                VStack(spacing: 10) {
+                    Text("Corte automático").font(.footnote.bold())
+                    Text(c).font(.footnote).multilineTextAlignment(.center)
+                    if let p = progressoCorte { ProgressView(value: p).frame(width: 200) } else { ProgressView() }
+                    Button("Cancelar", role: .cancel) { tarefaCorte?.cancel() }.buttonStyle(.glass).font(.footnote)
+                }
+                .padding(14)
+                .background(.black.opacity(0.8), in: .rect(cornerRadius: 14))
             }
         }
         .frame(maxWidth: .infinity)
@@ -274,6 +294,7 @@ struct EditorVideoView: View {
         .overlay {
             RoundedRectangle(cornerRadius: 6).stroke(arrastando ? Color.cyan : (sel ? Color.yellow : Color.clear), lineWidth: 3)
         }
+        .overlay(alignment: .topLeading) { if !cortes.isEmpty { marcasCorte(t) } }
         .overlay(alignment: .leading) { if sel && !arrastando { alca(t, inicio: true) } }
         .overlay(alignment: .trailing) { if sel && !arrastando { alca(t, inicio: false) } }
         .overlay(alignment: .topLeading) {
@@ -362,6 +383,8 @@ struct EditorVideoView: View {
     private var ferramentas: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 10) {
+                ferramenta("Corte auto", "scissors.circle") { proporCortes() }
+                    .disabled(cortando != nil)
                 ferramenta("Dividir", "scissors") { dividir() }
                 ferramenta("Remover", "trash") {
                     if let k = indiceSelecionado() ?? indiceNoCursor() { remover(trechos[k].id) }
@@ -385,11 +408,13 @@ struct EditorVideoView: View {
                     Button("Fechar todos os espaços", systemImage: "arrow.left.to.line") { fecharTodosEspacos() }
                 } label: { rotulo("Ordem", "arrow.left.arrow.right") }
                 .buttonStyle(.glass)
+                if !soAudio {
                 Menu {
                     Button("Da galeria", systemImage: "photo.on.rectangle") { mostrarGaleria = true }
                     Button("Do app Arquivos", systemImage: "folder") { escolhendoArquivo = true }
                 } label: { rotulo("+ Vídeo", "plus.rectangle.on.rectangle") }
                 .buttonStyle(.glass)
+                }
             }
             .padding(.horizontal).padding(.vertical, 10)
         }
@@ -707,6 +732,143 @@ struct EditorVideoView: View {
         return r
     }
 
+    // MARK: corte automático
+
+    /// Transcreve cada arquivo usado (ou pega a transcrição guardada) e marca em vermelho o que a
+    /// regra aprovada tiraria. Nada muda nos trechos até "Aplicar cortes".
+    private func proporCortes() {
+        guard tarefaCorte == nil else { return }
+        guard ModeloCrisper.pronto else {
+            aviso = "Falta o modelo do corte automático. Baixe em Ajustes › Corte automático (1,2 GB)."
+            return
+        }
+        player.pause(); tocando = false
+        let usadas = Array(Set(trechos.map { $0.fonte })).sorted()
+        let urls = fontes
+        cortando = "Preparando"; progressoCorte = nil
+        tarefaCorte = Task {
+            defer { cortando = nil; progressoCorte = nil; tarefaCorte = nil; ServicoCorte.shared.liberar() }
+            do {
+                var novas: [CorteProposto] = []
+                for (n, k) in usadas.enumerated() where urls.indices.contains(k) {
+                    let rotulo = usadas.count > 1 ? "Arquivo \(n + 1) de \(usadas.count): " : ""
+                    let prop = try await ServicoCorte.shared.propor(urls[k]) { msg, p in
+                        Task { @MainActor in
+                            if cortando != nil { cortando = rotulo + msg; progressoCorte = p }
+                        }
+                    }
+                    novas += prop.tirar.map { CorteProposto(fonte: k, i: $0.i, f: $0.f, texto: $0.texto) }
+                }
+                let atuais = trechos
+                cortes = novas.filter { c in atuais.contains { $0.fonte == c.fonte && $0.fim > c.i + 0.005 && $0.inicio < c.f - 0.005 } }
+                if cortes.isEmpty { aviso = "Não achei nada para cortar." }
+            } catch is CancellationError {
+            } catch {
+                if !Task.isCancelled { aviso = "Corte automático: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)" }
+            }
+        }
+    }
+
+    /// Marcas vermelhas dos cortes propostos dentro de um trecho (toque = manter aquele pedaço).
+    private func marcasCorte(_ t: TrechoEdicao) -> some View {
+        let v = max(0.1, t.velocidade)
+        let aqui = cortes.filter { $0.fonte == t.fonte && $0.f > t.inicio && $0.i < t.fim }
+        return ZStack(alignment: .topLeading) {
+            ForEach(aqui) { c in
+                let a = max(c.i, t.inicio), b = min(c.f, t.fim)
+                let x = CGFloat((a - t.inicio) / v) * zoom
+                let w = max(3, CGFloat((b - a) / v) * zoom)
+                ZStack {
+                    if c.manter {
+                        Rectangle().strokeBorder(Color.white.opacity(0.7), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                    } else {
+                        Rectangle().fill(Color.red.opacity(0.5))
+                        if w > 30 {
+                            Text(c.texto).font(.system(size: 9, weight: .semibold)).lineLimit(2)
+                                .foregroundStyle(.white).padding(2)
+                        }
+                    }
+                }
+                .frame(width: w, height: 92)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if let k = cortes.firstIndex(where: { $0.id == c.id }) { cortes[k].manter.toggle() }
+                }
+                .offset(x: x)
+            }
+        }
+    }
+
+    private var painelCortes: some View {
+        let ativos = cortes.filter { !$0.manter }
+        let tira = ativos.reduce(0.0) { soma, c in
+            soma + trechos.filter { $0.fonte == c.fonte }.reduce(0.0) { s, t in
+                s + max(0, min(c.f, t.fim) - max(c.i, t.inicio)) / max(0.1, t.velocidade)
+            }
+        }
+        return VStack(spacing: 8) {
+            HStack {
+                Label("\(ativos.count) cortes · tira \(String(format: "%.1f", tira).replacingOccurrences(of: ".", with: ",")) s",
+                      systemImage: "scissors").font(.footnote.bold())
+                Spacer()
+            }
+            Text("Vermelho sai. Toque numa marca para manter aquele pedaço (fica tracejada).")
+                .font(.caption2).foregroundStyle(Tema.texto2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 8) {
+                Button("Descartar") { cortes = [] }
+                Spacer()
+                Button { aplicarCortes() } label: { Label("Aplicar cortes", systemImage: "checkmark") }
+                    .buttonStyle(.glassProminent).tint(Tema.acento)
+                    .disabled(ativos.isEmpty)
+            }
+            .font(.footnote)
+            .buttonStyle(.glass)
+        }
+        .padding(.horizontal).padding(.vertical, 10)
+        .background(Color(white: 0.11))
+    }
+
+    /// Divide os trechos nos cortes e fecha os buracos deles; os espaços vazios que já existiam ficam.
+    private func aplicarCortes() {
+        let ativos = cortes.filter { !$0.manter }
+        guard !ativos.isEmpty else { cortes = []; return }
+        registrar()
+        var nova: [TrechoEdicao] = []
+        var desloc = 0.0
+        for t in ProjetoEdicao.posicionados(trechos) {
+            let v = max(0.1, t.velocidade)
+            let cs = ativos.filter { $0.fonte == t.fonte && $0.f > t.inicio && $0.i < t.fim }.sorted { $0.i < $1.i }
+            var pos = t.naLinha - desloc
+            guard !cs.isEmpty else {
+                var c = t; c.posicao = pos; nova.append(c); continue
+            }
+            var pedacos: [(Double, Double)] = []
+            var a = t.inicio
+            for c in cs {
+                if c.i > a { pedacos.append((a, min(c.i, t.fim))) }
+                a = max(a, c.f)
+            }
+            if a < t.fim { pedacos.append((a, t.fim)) }
+            pedacos = pedacos.filter { $0.1 - $0.0 > 0.02 }
+            var fica = 0.0
+            for (n, (i0, f0)) in pedacos.enumerated() {
+                var c = t
+                if n > 0 { c.id = UUID() }
+                c.inicio = i0; c.fim = f0
+                c.corteInicio = i0; c.corteFim = f0
+                c.posicao = pos
+                nova.append(c)
+                pos += (f0 - i0) / v
+                fica += (f0 - i0) / v
+            }
+            desloc += t.duracao - fica
+        }
+        trechos = nova
+        cortes = []
+        selecionado = nil
+    }
+
     // MARK: carregar e prévia
 
     private func carregar() async {
@@ -719,6 +881,11 @@ struct EditorVideoView: View {
             d.append(s.isFinite ? s : 0)
         }
         duracoes = d
+        var algumVideo = false
+        for u in fontes where !((try? await AVURLAsset(url: u).loadTracks(withMediaType: .video)) ?? []).isEmpty {
+            algumVideo = true; break
+        }
+        soAudio = !algumVideo
         if let p = aberto.projeto {
             trechos = ProjetoEdicao.posicionados(p.trechos)
         } else {
@@ -735,6 +902,7 @@ struct EditorVideoView: View {
         zoom = min(200, max(5, largura * 3 / CGFloat(max(total, 1))))
         await atualizarPrevia()
         carregado = true
+        if aberto.cortarAoAbrir { proporCortes() }
         for (k, u) in fontes.enumerated() {
             let o = await AmostrasEdicao.shared.onda(u)
             ondas[k] = o
@@ -883,6 +1051,7 @@ struct FolhaGravarEdicao: View {
     let fontes: [URL]
     let nomes: [String]
     let trechos: [TrechoEdicao]
+    var soAudio = false
     var gravar: (OpcoesConversao, ModoGravacaoEdicao, String) -> Void
 
     @State private var modo: ModoGravacaoEdicao = .video
@@ -903,7 +1072,7 @@ struct FolhaGravarEdicao: View {
                 VStack(spacing: 16) {
                     Cartao(titulo: "Gravar", icone: "square.and.arrow.down") {
                         Picker("Saída", selection: $modo) {
-                            ForEach([ModoGravacaoEdicao.video, .separados, .audio]) { Text($0.nome).tag($0) }
+                            ForEach(soAudio ? [ModoGravacaoEdicao.audio] : [.video, .separados, .audio]) { Text($0.nome).tag($0) }
                         }
                         .pickerStyle(.segmented)
                         Text(textoModo).font(.footnote).foregroundStyle(Tema.texto2)
@@ -964,6 +1133,7 @@ struct FolhaGravarEdicao: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Voltar", systemImage: "chevron.left") { fechar() } }
             }
             .task {
+                if soAudio { modo = .audio }
                 o.ladoMenor = 0
                 o.qualidade = 0.75
                 if base.isEmpty {
@@ -1042,4 +1212,15 @@ struct FormaIma: Shape {
         p.move(to: pt(13, 5.5)); p.addLine(to: pt(17.5, 5.5))
         return p
     }
+}
+
+
+/// Um pedaço que o corte automático tiraria (tempos no arquivo de origem).
+struct CorteProposto: Identifiable, Equatable {
+    let id = UUID()
+    var fonte: Int
+    var i: Double
+    var f: Double
+    var texto: String
+    var manter = false
 }

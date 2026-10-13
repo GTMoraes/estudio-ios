@@ -263,6 +263,21 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
   trecho num arquivo, só o áudio (M4A) ou sem regravar (um trecho, sem velocidade/volume). O resultado guarda
   a edição: "Editar de novo" reabre com os vídeos guardados em Originais. As fontes entram no trabalho por
   ligação direta ao arquivo (sem ocupar espaço de novo).
+- 0.20.0: **corte automático** (CrisperWhisper 2.0 turbo na GPU, regra "8-normal-v3"). `App/Crisper/ServicoCorte.swift`:
+  `ModeloCrisper` (modelo em Documents/CrisperWhisper; usa o que já estiver lá; se faltar, baixa de
+  cdn.frx9.com/modelos/crisperwhisper/ pelo `manifesto.json`, partes de 19 MB, continua de onde parou, SHA-256 por
+  arquivo, marca `.incompleto` enquanto baixa), `TranscricoesGuardadas` (Application Support/CorteAutomatico, chave =
+  tamanho + 1º e último MB; refeita se `CrisperTranscritor.versao` mudar), `ServicoCorte.propor` (transcreve ou usa a
+  guardada, aplica a regra e devolve o que fica e o que sai). Transcritor: recomeço com temperatura (0,4/0,6/0,8/1,0 ×
+  3 sorteios, só quando a janela "desaba" e o modo intended confirma) e recuperação de fim precoce (P(fim) < 0,7 com
+  ≥ 4 s de fala depois da última palavra, ou 2 s na última janela; aceita se terminar com P ≥ 0,9), como no pacote
+  oficial; o decodificador ganhou temperatura com semente, fim proibido nos N primeiros tokens e P(fim).
+  Editor: ferramenta "Corte auto" marca em vermelho o que sai (toque = manter, tracejado), "Aplicar cortes" divide e
+  fecha os buracos dos cortes (espaços vazios que já existiam ficam), com Desfazer. Áudio sozinho: Processar › Cortar
+  › "Cortar e gravar" (gera `-cortado.m4a` + `-cortes.txt`, trabalho `Retomada.Tipo.corte`) ou "Revisar no editor"
+  (o editor aceita só áudio: grava só áudio, sem "+ Vídeo"). Vídeo: Processar › Cortar abre o editor já propondo.
+  Ajustes: cartão "Corte automático" (baixar/pausar, apagar modelo, apagar transcrições guardadas); o cartão de teste saiu.
+  `scripts/preparar-crisper-cdn.py` monta a pasta do cdn a partir da pasta do modelo.
 - 0.19.3: **volume do editor com slider** (0% a 200%) na escala do ouvido: cada 10 dB soa como o dobro/metade,
   então 50% = -10 dB, 25% = -20 dB, 200% = +10 dB (`EscalaVolume`; `TrechoEdicao.volume` continua sendo ganho de
   amplitude, projetos antigos valem). Antes 25/50/75% eram de amplitude (-12/-6/-2,5 dB) e quase não mudavam

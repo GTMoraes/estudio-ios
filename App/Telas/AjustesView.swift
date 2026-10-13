@@ -43,7 +43,7 @@ struct AjustesView: View {
                     CartaoArmazenamento()
                     modeloLocalCartao
                     vozCartao
-                    CartaoTesteCrisper()
+                    CartaoCorteAutomatico()
                     Cartao(titulo: "Sobre", icone: "info.circle") {
                         let v = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
                         Text("Estúdio \(v)").font(.subheadline)

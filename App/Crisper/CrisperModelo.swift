@@ -108,12 +108,38 @@ final class CrisperModelo: @unchecked Sendable {
 
     // MARK: decodificação
 
-    /// Decodifica a partir de `prompt` até o fim do texto ou `maxNovos` tokens. `banirNoPrimeiro`:
-    /// tokens proibidos só no primeiro passo (o reparo de alucinação do pacote oficial).
-    /// Devolve os tokens gerados e, para cada um, a atenção (1500 quadros) que o escolheu.
+    /// Resultado de uma decodificação: os tokens (sem o fim de texto), a atenção (1500 quadros) de
+    /// cada um e a probabilidade que o modelo deu ao fim de texto quando parou (nil = parou pelo limite).
+    struct Decodificado {
+        var ids: [Int]
+        var atencao: [[Float]]
+        var probFim: Float?
+    }
+
+    /// Gerador de números pseudoaleatórios com semente (amostragem reproduzível).
+    private struct Sorteio {
+        var estado: UInt64
+        mutating func proximo() -> Double {
+            estado &+= 0x9E3779B97F4A7C15
+            var z = estado
+            z = (z ^ (z >> 30)) &* 0xBF58476D1CE4E5B9
+            z = (z ^ (z >> 27)) &* 0x94D049BB133111EB
+            z ^= z >> 31
+            return Double(z >> 11) / Double(1 << 53)
+        }
+    }
+
+    /// Decodifica a partir de `prompt` até o fim do texto ou `maxNovos` tokens, igual ao pacote oficial.
+    /// - `banirNoPrimeiro`: tokens proibidos só no primeiro passo (reparo de alucinação).
+    /// - `temperatura` > 0: sorteia pela distribuição (recomeço de trecho que saiu vazio); 0 = gulosa.
+    /// - `semFimAntes`: o fim de texto fica proibido nos primeiros N tokens (recuperação de fim precoce).
     func decodificar(prompt: [Int], encoder emb: MLMultiArray, maxNovos: Int,
-                     banirNoPrimeiro: Set<Int> = [], eot: Int) throws -> ([Int], [[Float]]) {
-        guard maxNovos > 0 else { return ([], []) }
+                     banirNoPrimeiro: Set<Int> = [], eot: Int, temperatura: Float = 0,
+                     semente: UInt64 = 0, semFimAntes: Int = 0) throws -> Decodificado {
+        guard maxNovos > 0 else { return Decodificado(ids: [], atencao: [], probFim: nil) }
+        var sorteio = Sorteio(estado: semente &+ 0x5EED)
+        var valores: [Float] = [], brutos: [Float] = []
+        var probFim: Float?
         let L = posicoes
         let kc = try MLMultiArray(shape: [1, NSNumber(value: largura), 1, NSNumber(value: L)], dataType: .float16)
         let vc = try MLMultiArray(shape: [1, NSNumber(value: largura), 1, NSNumber(value: L)], dataType: .float16)
@@ -164,18 +190,44 @@ final class CrisperModelo: @unchecked Sendable {
 
             if pos >= prompt.count - 1 {
                 let primeiro = gerados.isEmpty
+                let proibirFim = gerados.count < semFimAntes
                 var melhor = -1
                 var valor = -Float.infinity
+                var maxBruto = -Float.infinity       // maior logit entre os não suprimidos
                 logits.withUnsafeBufferPointer(ofType: Float16.self) { p in
                     let st = logits.strides.map { $0.intValue }
                     let n = logits.shape.last!.intValue
                     let passo = st.last!
+                    if brutos.count != n {
+                        brutos = Array(repeating: -Float.infinity, count: n)
+                        valores = Array(repeating: -Float.infinity, count: n)
+                    }
                     for t in 0..<n {
-                        if t < suprimidos.count && suprimidos[t] { continue }
-                        if primeiro && banirNoPrimeiro.contains(t) { continue }
+                        if t < suprimidos.count && suprimidos[t] { brutos[t] = -Float.infinity; valores[t] = -Float.infinity; continue }
                         let v = Float(p[t * passo])
+                        brutos[t] = v
+                        if v > maxBruto { maxBruto = v }
+                        if (primeiro && banirNoPrimeiro.contains(t)) || (proibirFim && t == eot) {
+                            valores[t] = -Float.infinity; continue
+                        }
+                        valores[t] = v
                         if v > valor { valor = v; melhor = t }
                     }
+                }
+                if temperatura > 0, melhor >= 0 {
+                    var soma: Double = 0
+                    for v in valores where v > -Float.infinity { soma += exp(Double((v - valor) / temperatura)) }
+                    var alvo = sorteio.proximo() * soma
+                    for (t, v) in valores.enumerated() where v > -Float.infinity {
+                        alvo -= exp(Double((v - valor) / temperatura))
+                        if alvo <= 0 { melhor = t; break }
+                    }
+                }
+                if melhor == eot {
+                    // P(fim) como o pacote oficial mede: softmax sem temperatura, só com a supressão
+                    var soma: Double = 0
+                    for v in brutos where v > -Float.infinity { soma += exp(Double(v - maxBruto)) }
+                    probFim = soma > 0 ? Float(exp(Double(brutos[eot] - maxBruto)) / soma) : nil
                 }
                 if let al = saida.featureValue(for: "alignment_heads_weights")?.multiArrayValue, al.dataType == .float16 {
                     var linha = Array(repeating: Float(0), count: Self.quadrosEncoder)
@@ -191,7 +243,8 @@ final class CrisperModelo: @unchecked Sendable {
             }
             pos += 1
         }
-        return (gerados, Array(atencao.prefix(gerados.count)))
+        return Decodificado(ids: gerados, atencao: Array(atencao.prefix(gerados.count)),
+                            probFim: probFim)
     }
 
     private static func exigirFloat16(_ a: MLMultiArray, _ nome: String) throws {

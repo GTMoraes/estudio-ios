@@ -69,7 +69,7 @@ struct OrigemImagem: Codable, Equatable {
 /// Tudo o que um trabalho no iPhone precisa para ser continuado depois que o app foi fechado.
 /// A entrada fica em Trabalhos/<id>/entrada (ver SegundoPlano.swift).
 struct Retomada: Codable, Equatable {
-    enum Tipo: String, Codable { case voz, conversao, imagens, transcricao, loteConversao, drive, legenda, edicao }
+    enum Tipo: String, Codable { case voz, conversao, imagens, transcricao, loteConversao, drive, legenda, edicao, corte }
     var tipo: Tipo
     var entradas: [String]            // nomes dentro de Trabalhos/<id>/entrada
     var nome: String                  // nome do arquivo original

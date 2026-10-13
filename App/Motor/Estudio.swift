@@ -568,6 +568,7 @@ final class Estudio {
         case .drive: executarDrive(id)
         case .legenda: executarLegenda(id)
         case .edicao: executarEdicao(id)
+        case .corte: executarCorte(id)
         }
     }
 
@@ -973,6 +974,41 @@ final class Estudio {
             }
             self.historico.atualizar(id, salvarAgora: false) { $0.retomada?.edicao = projeto }
             self.concluir(id, arquivos: saidas.map { $0.lastPathComponent }, inicio: inicio, duracao: projeto.duracao)
+        }
+    }
+
+    // --- corte automático de um áudio (CrisperWhisper na GPU + regra aprovada)
+
+    func cortarAudio(_ arquivo: URL, nome: String, data: Date = Date()) {
+        let base = Self.base(nome)
+        let id = novoItem(.audio, nome, nuvem: false, mensagem: "Preparando", base: base)
+        let r = Retomada(tipo: .corte, entradas: [], nome: nome, base: base, data: data)
+        if prepararTrabalho(id, [arquivo], r) { executarCorte(id) }
+    }
+
+    private func executarCorte(_ id: UUID) {
+        guard let r = historico.item(id)?.retomada, let nomeEntrada = r.entradas.first else { return }
+        let arquivo = entrada(id, nomeEntrada)
+        let base = r.base ?? Self.base(r.nome)
+        let nome = r.nome
+        let inicio = Date()
+        rodar(id, recomecar: true) {
+            try await self.aguardarVez(id)
+            defer { ServicoCorte.shared.liberar() }
+            let prop = try await ServicoCorte.shared.propor(arquivo) { msg, p in
+                Task { @MainActor in self.etapa(id, msg, p) }
+            }
+            guard !prop.manter.isEmpty else { throw ErroApp("Não encontrei fala nesse áudio.") }
+            guard let item = self.historico.item(id) else { return }
+            try FileManager.default.createDirectory(at: item.pasta, withIntermediateDirectories: true)
+            self.etapa(id, "Gravando o áudio cortado")
+            let nomeAudio = "\(base)-cortado.m4a", nomeTexto = "\(base)-cortes.txt"
+            try await CorteAutomatico.gravar(origem: arquivo, trechos: prop.manter, destino: item.url(nomeAudio))
+            try ServicoCorte.relatorio(prop, nome: nome).write(to: item.url(nomeTexto), atomically: true, encoding: .utf8)
+            let fica = prop.manter.reduce(0) { $0 + ($1.f - $1.i) }
+            self.concluir(id, arquivos: [nomeAudio, nomeTexto],
+                          resumo: "\(prop.tirar.count) cortes · \(String(prop.texto.prefix(300)))",
+                          inicio: inicio, duracao: fica)
         }
     }
 
