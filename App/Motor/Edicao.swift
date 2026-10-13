@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import CoreMedia
+import MediaToolbox
 import UIKit
 
 // MARK: - projeto
@@ -12,7 +13,7 @@ struct TrechoEdicao: Codable, Identifiable, Equatable {
     var inicio: Double             // segundos no arquivo de origem
     var fim: Double
     var velocidade: Double = 1     // 0,25 … 4 (o tom da voz é mantido)
-    var volume: Double = 1         // 0 … 1
+    var volume: Double = 1         // ganho de amplitude: 0 = mudo, 1 = original, até ~3,16 (+10 dB); ver EscalaVolume
     /// Onde o trecho começa na linha do tempo (nil = logo depois do anterior: projetos da 0.19.0).
     var posicao: Double?
     /// Recorte de quando o trecho foi criado/dividido: as alças grudam aqui com o ímã ligado.
@@ -77,8 +78,8 @@ enum ModoGravacaoEdicao: String, Codable, CaseIterable, Identifiable {
 /// Monta os trechos numa composição única: uma trilha de vídeo e uma de áudio, cada trecho na sua
 /// posição e com a sua velocidade; espaço vazio = tela preta e silêncio. O primeiro vídeo define o
 /// formato (os outros entram inteiros, centrados, com barras pretas se a proporção for outra).
-/// Volume: trecho mudo nem leva o som; volume parcial vai em `ganhos` (a gravação aplica nas
-/// amostras) e em rampas do mixer (a prévia).
+/// Volume: trecho mudo nem leva o som; os outros volumes vão em `ganhos`, aplicados pelo
+/// `ProcessadorGanho` nas amostras (gravação) e num tap do mixer (prévia).
 struct MontagemEdicao {
     let composicao: AVMutableComposition
     let video: AVMutableCompositionTrack?
@@ -181,7 +182,7 @@ struct MontagemEdicao {
                 }
                 fimV = reescala(fimV); fimA = reescala(fimA)
             }
-            if t.volume > 0.001 && t.volume < 0.999 {
+            if t.volume > 0.001 && abs(t.volume - 1) > 0.001 {
                 let ini = CMTimeGetSeconds(cursor)
                 ganhos.append(GanhoAudio(inicio: ini, fim: ini + CMTimeGetSeconds(novo), ganho: Float(t.volume)))
             }
@@ -220,22 +221,28 @@ struct MontagemEdicao {
             }
             vc = c
         }
-        // prévia: volume parcial por rampas constantes (a gravação aplica `ganhos` direto nas amostras)
+        // prévia: o som passa pelo mesmo processador da gravação (volume e limitador). Se o tap não
+        // for criado, rampas do mixer (sem aumento acima de 100%).
         var mix: AVMutableAudioMix?
         if temAudio, let ca, !ganhos.isEmpty {
-            let p = AVMutableAudioMixInputParameters(track: ca)
-            for g in ganhos {
-                p.setVolumeRamp(fromStartVolume: g.ganho, toEndVolume: g.ganho,
-                                timeRange: CMTimeRange(start: CMTime(seconds: g.inicio, preferredTimescale: ts),
-                                                       end: CMTime(seconds: g.fim, preferredTimescale: ts)))
-                // depois do trecho o volume volta a 100% (o último valor do mixer continuaria valendo)
-                if !ganhos.contains(where: { abs($0.inicio - g.fim) < 0.001 }) {
-                    p.setVolume(1, at: CMTime(seconds: g.fim, preferredTimescale: ts))
+            if let m = ProcessadorGanho(ganhos).mixPrevia(trilha: ca) {
+                mix = m
+            } else {
+                let p = AVMutableAudioMixInputParameters(track: ca)
+                for g in ganhos {
+                    let v = min(1, g.ganho)
+                    p.setVolumeRamp(fromStartVolume: v, toEndVolume: v,
+                                    timeRange: CMTimeRange(start: CMTime(seconds: g.inicio, preferredTimescale: ts),
+                                                           end: CMTime(seconds: g.fim, preferredTimescale: ts)))
+                    // depois do trecho o volume volta a 100% (o último valor do mixer continuaria valendo)
+                    if !ganhos.contains(where: { abs($0.inicio - g.fim) < 0.001 }) {
+                        p.setVolume(1, at: CMTime(seconds: g.fim, preferredTimescale: ts))
+                    }
                 }
+                let m = AVMutableAudioMix()
+                m.inputParameters = [p]
+                mix = m
             }
-            let m = AVMutableAudioMix()
-            m.inputParameters = [p]
-            mix = m
         }
         return MontagemEdicao(composicao: comp, video: temVideo ? cv : nil, audio: temAudio ? ca : nil,
                               videoComposition: vc, audioMix: mix, ganhos: ganhos,
@@ -243,14 +250,75 @@ struct MontagemEdicao {
     }
 }
 
-/// Volume de um intervalo da edição (segundos no resultado).
+/// Volume de um intervalo da edição (segundos no resultado). `ganho` é de amplitude (1 = original).
 struct GanhoAudio: Sendable {
     let inicio: Double
     let fim: Double
     let ganho: Float
+}
 
-    /// Multiplica as amostras PCM de 16 bits pelo volume de cada instante. Sem nada a mudar, devolve a mesma.
-    static func aplicar(_ ganhos: [GanhoAudio], em sb: CMSampleBuffer) -> CMSampleBuffer {
+/// Escala do volume no editor. A porcentagem segue o ouvido: cada 10 dB soa como o dobro (ou a metade)
+/// do volume, então 50% = -10 dB, 25% = -20 dB e 200% = +10 dB. `TrechoEdicao.volume` guarda o ganho
+/// de amplitude correspondente (projetos antigos continuam valendo: 0,5 lá aparece como 66% aqui).
+enum EscalaVolume {
+    static let maximo = 2.0                                  // 200% = +10 dB
+
+    static func decibeis(porcento s: Double) -> Double { 10 * log2(max(s, 1e-6)) }
+    static func ganho(porcento s: Double) -> Double { s < 0.005 ? 0 : pow(10, decibeis(porcento: s) / 20) }
+    static func porcento(ganho g: Double) -> Double { g < 1e-6 ? 0 : pow(2, 20 * log10(g) / 10) }
+
+    static func texto(porcento s: Double) -> String {
+        if s < 0.005 { return "Mudo" }
+        let db = decibeis(porcento: s)
+        let dbTexto = abs(db) < 0.05 ? "0 dB" : String(format: "%+.1f dB", db).replacingOccurrences(of: ".", with: ",")
+        return "\(Int((s * 100).rounded()))% · \(dbTexto)"
+    }
+    static func texto(ganho g: Double) -> String { texto(porcento: porcento(ganho: g)) }
+}
+
+/// Aplica o volume de cada intervalo. Onde o volume passa de 100%, um limitador segura os picos em
+/// -0,3 dBFS (ataque imediato, soltura de ~80 ms) para o som aumentado não estourar; fora desses
+/// intervalos o som só é multiplicado. Guarda o estado do limitador entre um bloco e outro: um
+/// processador por gravação (ou por prévia).
+final class ProcessadorGanho: @unchecked Sendable {
+    let ganhos: [GanhoAudio]
+    private var envelope: Float = 1
+    private static let teto: Float = 0.966
+
+    init(_ ganhos: [GanhoAudio]) { self.ganhos = ganhos.sorted { $0.inicio < $1.inicio } }
+
+    func reiniciar() { envelope = 1 }
+
+    /// `ler(quadro, canal)` / `gravar(quadro, canal, valor)` em -1…1.
+    @inline(__always)
+    func processar(t0: Double, taxa: Double, quadros n: Int, canais: Int,
+                   ler: (Int, Int) -> Float, gravar: (Int, Int, Float) -> Void) {
+        let t1 = t0 + Double(n) / taxa
+        let aqui = ganhos.filter { $0.fim > t0 && $0.inicio < t1 }
+        guard !aqui.isEmpty, canais > 0 else { envelope = 1; return }
+        let soltura = Float(1 - exp(-1 / (0.08 * taxa)))
+        var j = 0
+        var y = [Float](repeating: 0, count: canais)
+        for i in 0..<n {
+            let t = t0 + Double(i) / taxa
+            while j < aqui.count && t >= aqui[j].fim { j += 1 }
+            guard j < aqui.count, t >= aqui[j].inicio else { envelope = 1; continue }
+            let g = aqui[j].ganho
+            var pico: Float = 0
+            for c in 0..<canais { y[c] = ler(i, c) * g; pico = max(pico, abs(y[c])) }
+            if g > 1.0001 {
+                let alvo = pico > Self.teto ? Self.teto / pico : 1
+                if alvo < envelope { envelope = alvo } else { envelope += (alvo - envelope) * soltura }
+                for c in 0..<canais { y[c] *= envelope }
+            } else {
+                envelope = 1
+            }
+            for c in 0..<canais { gravar(i, c, y[c]) }
+        }
+    }
+
+    /// Gravação: amostras PCM de 16 bits intercaladas. Sem nada a mudar, devolve a mesma.
+    func aplicar(em sb: CMSampleBuffer) -> CMSampleBuffer {
         guard !ganhos.isEmpty,
               let fd = CMSampleBufferGetFormatDescription(sb),
               let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(fd)?.pointee,
@@ -262,8 +330,7 @@ struct GanhoAudio: Sendable {
         let t0 = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sb))
         guard n > 0, t0.isFinite else { return sb }
         let t1 = t0 + Double(n) / taxa
-        let aqui = ganhos.filter { $0.fim > t0 && $0.inicio < t1 }
-        guard !aqui.isEmpty else { return sb }
+        guard ganhos.contains(where: { $0.fim > t0 && $0.inicio < t1 }) else { envelope = 1; return sb }
         let bytes = n * canais * 2
         guard CMBlockBufferGetDataLength(bloco) >= bytes else { return sb }
         var dados = [Int16](repeating: 0, count: n * canais)
@@ -271,13 +338,10 @@ struct GanhoAudio: Sendable {
             CMBlockBufferCopyDataBytes(bloco, atOffset: 0, dataLength: bytes, destination: p.baseAddress!)
         }
         guard r == kCMBlockBufferNoErr else { return sb }
-        for i in 0..<n {
-            let t = t0 + Double(i) / taxa
-            guard let g = aqui.first(where: { t >= $0.inicio && t < $0.fim }) else { continue }
-            for c in 0..<canais {
-                let k = i * canais + c
-                dados[k] = Int16(clamping: Int((Float(dados[k]) * g.ganho).rounded()))
-            }
+        dados.withUnsafeMutableBufferPointer { d in
+            processar(t0: t0, taxa: taxa, quadros: n, canais: canais,
+                      ler: { i, c in Float(d[i * canais + c]) / 32768 },
+                      gravar: { i, c, v in d[i * canais + c] = Int16(clamping: Int((v * 32768).rounded())) })
         }
         var novoBloco: CMBlockBuffer?
         guard CMBlockBufferCreateWithMemoryBlock(allocator: kCFAllocatorDefault, memoryBlock: nil, blockLength: bytes,
@@ -295,6 +359,74 @@ struct GanhoAudio: Sendable {
             presentationTimeStamp: CMSampleBufferGetPresentationTimeStamp(sb), packetDescriptions: nil,
             sampleBufferOut: &novo)
         return st == noErr ? (novo ?? sb) : sb
+    }
+
+    // MARK: prévia
+
+    /// Estado do "tap" da prévia (formato que o player entrega).
+    private final class CaixaTap {
+        let proc: ProcessadorGanho
+        var taxa: Double = 44100
+        var canais = 2
+        var planar = true
+        var flutuante = true
+        init(_ p: ProcessadorGanho) { proc = p }
+    }
+
+    /// Prévia: o som do player passa por este mesmo processador (o mixer do AVFoundation não aceita
+    /// volume acima de 100%). nil se o iOS não criar o tap.
+    func mixPrevia(trilha: AVAssetTrack) -> AVMutableAudioMix? {
+        let caixa = CaixaTap(self)
+        let info = Unmanaged.passRetained(caixa).toOpaque()
+        var cb = MTAudioProcessingTapCallbacks(
+            version: kMTAudioProcessingTapCallbacksVersion_0,
+            clientInfo: info,
+            init: { _, clientInfo, storage in storage.pointee = clientInfo },
+            finalize: { tap in
+                Unmanaged<CaixaTap>.fromOpaque(MTAudioProcessingTapGetStorage(tap)).release()
+            },
+            prepare: { tap, _, formato in
+                let c = Unmanaged<CaixaTap>.fromOpaque(MTAudioProcessingTapGetStorage(tap)).takeUnretainedValue()
+                let f = formato.pointee
+                c.taxa = f.mSampleRate > 0 ? f.mSampleRate : 44100
+                c.canais = max(1, Int(f.mChannelsPerFrame))
+                c.planar = f.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0
+                c.flutuante = f.mFormatFlags & kAudioFormatFlagIsFloat != 0 && f.mBitsPerChannel == 32
+                c.proc.reiniciar()
+            },
+            unprepare: { _ in },
+            process: { tap, quadros, _, lista, quadrosSaida, flagsSaida in
+                var faixa = CMTimeRange()
+                guard MTAudioProcessingTapGetSourceAudio(tap, quadros, lista, flagsSaida, &faixa, quadrosSaida) == noErr
+                else { return }
+                let c = Unmanaged<CaixaTap>.fromOpaque(MTAudioProcessingTapGetStorage(tap)).takeUnretainedValue()
+                let t0 = CMTimeGetSeconds(faixa.start)
+                let n = Int(quadrosSaida.pointee)
+                guard c.flutuante, t0.isFinite, n > 0 else { return }
+                let abl = UnsafeMutableAudioBufferListPointer(lista)
+                if c.planar {
+                    let ps = abl.compactMap { $0.mData?.assumingMemoryBound(to: Float.self) }
+                    guard !ps.isEmpty else { return }
+                    c.proc.processar(t0: t0, taxa: c.taxa, quadros: n, canais: ps.count,
+                                     ler: { i, k in ps[k][i] }, gravar: { i, k, v in ps[k][i] = v })
+                } else {
+                    guard let p = abl.first?.mData?.assumingMemoryBound(to: Float.self) else { return }
+                    let k0 = c.canais
+                    c.proc.processar(t0: t0, taxa: c.taxa, quadros: n, canais: k0,
+                                     ler: { i, k in p[i * k0 + k] }, gravar: { i, k, v in p[i * k0 + k] = v })
+                }
+            })
+        var tap: MTAudioProcessingTap?
+        guard MTAudioProcessingTapCreate(kCFAllocatorDefault, &cb, kMTAudioProcessingTapCreationFlag_PostEffects, &tap) == noErr,
+              let tap else {
+            Unmanaged<CaixaTap>.fromOpaque(info).release()
+            return nil
+        }
+        let p = AVMutableAudioMixInputParameters(track: trilha)
+        p.audioTapProcessor = tap
+        let m = AVMutableAudioMix()
+        m.inputParameters = [p]
+        return m
     }
 }
 
@@ -413,7 +545,10 @@ enum ConversorEdicao {
         }
         let ganhos = m.ganhos
         var ajustes: [Int: @Sendable (CMSampleBuffer) -> CMSampleBuffer] = [:]
-        if !ganhos.isEmpty && pares.count > 1 { ajustes[1] = { GanhoAudio.aplicar(ganhos, em: $0) } }
+        if !ganhos.isEmpty && pares.count > 1 {
+            let proc = ProcessadorGanho(ganhos)
+            ajustes[1] = { proc.aplicar(em: $0) }
+        }
         try await Bombeador.bombear(reader: reader, writer: writer, pares: pares, inicio: .zero, duracao: m.duracao,
                                     cancel: cancel, progresso: progresso, quadro: ConversorVideo.duracaoDoQuadro(p.fps),
                                     ajustes: ajustes)
@@ -445,7 +580,10 @@ enum ConversorEdicao {
         writer.add(aIn)
         let ganhos = m.ganhos
         var ajustes: [Int: @Sendable (CMSampleBuffer) -> CMSampleBuffer] = [:]
-        if !ganhos.isEmpty { ajustes[0] = { GanhoAudio.aplicar(ganhos, em: $0) } }
+        if !ganhos.isEmpty {
+            let proc = ProcessadorGanho(ganhos)
+            ajustes[0] = { proc.aplicar(em: $0) }
+        }
         try await Bombeador.bombear(reader: reader, writer: writer, pares: [(aOut, aIn)], inicio: .zero, duracao: m.duracao,
                                     cancel: cancel, progresso: progresso, ajustes: ajustes)
         progresso(1)

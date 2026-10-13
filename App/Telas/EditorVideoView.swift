@@ -37,6 +37,11 @@ struct EditorVideoView: View {
     @State private var aparando: (id: UUID, inicio: Double, fim: Double, pos: Double)?
     @State private var movendo: (id: UUID, pos: Double)?
     @State private var ima = true
+    @State private var painelVolume = false
+    @State private var volumeSlider: Double = 1           // 0 … EscalaVolume.maximo (1 = 100%)
+    @State private var deslocLinha: CGFloat = 0           // rolagem da linha do tempo (pontos)
+    @State private var larguraLinha: CGFloat = 0
+    @State private var pegaFixo: CGFloat?                 // posição do pegador enquanto arrasta
     @State private var grudadoEm: Double?
     @State private var espacoTocado: Espaco?
     @State private var versaoPrevia = 0
@@ -66,6 +71,7 @@ struct EditorVideoView: View {
                 previa
                 barraTempo
                 linhaDoTempo
+                if painelVolume { painelDeVolume }
                 ferramentas
             }
             .background(Color.black)
@@ -82,10 +88,7 @@ struct EditorVideoView: View {
                         Button { voltar() } label: { Image(systemName: "arrow.uturn.backward") }.disabled(desfazer.isEmpty)
                         Button { avancar() } label: { Image(systemName: "arrow.uturn.forward") }.disabled(refazer.isEmpty)
                         Button { ima.toggle() } label: {
-                            Text("Ímã").font(.footnote.bold())
-                                .padding(.horizontal, 8).padding(.vertical, 3)
-                                .background(ima ? Color.yellow : Color.white.opacity(0.15), in: .capsule)
-                                .foregroundStyle(ima ? Color.black : Color.white)
+                            IconeIma(ligado: ima).frame(width: 22, height: 22)
                         }
                         .accessibilityLabel(ima ? "Ímã ligado" : "Ímã desligado")
                     }
@@ -146,11 +149,13 @@ struct EditorVideoView: View {
                 }
             }
             .onChange(of: trechos) { _, _ in
+                if painelVolume { sincronizarVolume() }     // desfazer/refazer também mexe no volume
                 // arrastando uma alça ou um trecho: a prévia é montada só ao soltar
                 guard aparando == nil, movendo == nil else { return }
                 Task { await atualizarPrevia() }
             }
-            .onChange(of: selecionado) { _, _ in movendo = nil; aparando = nil; grudadoEm = nil }
+            .onChange(of: selecionado) { _, _ in movendo = nil; aparando = nil; grudadoEm = nil; pegaFixo = nil }
+            .onChange(of: alvoVolume) { _, _ in sincronizarVolume() }
             .onDisappear { player.pause() }
         }
         .preferredColorScheme(.dark)
@@ -226,6 +231,7 @@ struct EditorVideoView: View {
                     if rolando && tocando { tocando = false; player.pause() }
                 }
                 .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.x } action: { _, x in
+                    deslocLinha = x
                     guard rolando else { return }
                     tempo = min(max(0, Double(x / zoom)), duracaoLinha)
                     buscar(min(tempo, total))
@@ -242,6 +248,8 @@ struct EditorVideoView: View {
                 // cursor fixo no meio
                 Rectangle().fill(Color.white).frame(width: 2, height: 110).allowsHitTesting(false)
             }
+            .onAppear { larguraLinha = g.size.width }
+            .onChange(of: g.size.width) { _, w in larguraLinha = w }
         }
         .frame(height: 116)
         .background(Color(white: 0.08))
@@ -274,15 +282,32 @@ struct EditorVideoView: View {
                     .background(.black.opacity(0.6), in: .rect(cornerRadius: 4)).padding(4)
             }
         }
-        .overlay(alignment: .top) { if sel { alcaMover(t) } }
+        .overlay(alignment: .topLeading) {
+            if sel {
+                let x = (arrastando ? pegaFixo : nil) ?? posicaoPegador(t, largura: largura)
+                alcaMover(t, x: x).offset(x: x)
+            }
+        }
         .scaleEffect(arrastando ? 1.04 : 1)
         .contentShape(Rectangle())
         .onTapGesture { selecionado = sel ? nil : t.id }
     }
 
-    /// Pegador no meio do trecho selecionado: arrastar move o trecho pela linha do tempo.
+    /// Onde fica o pegador (x dentro do trecho): no meio da parte do trecho que aparece na tela, para
+    /// estar sempre ao alcance mesmo em trecho longo.
+    private func posicaoPegador(_ t: TrechoEdicao, largura: CGFloat) -> CGFloat {
+        let w: CGFloat = 44
+        guard largura > w else { return (largura - w) / 2 }
+        let meia = larguraLinha / 2
+        let visIni = Double((deslocLinha - meia) / zoom), visFim = Double((deslocLinha + larguraLinha - meia) / zoom)
+        let a = max(t.naLinha, visIni), b = min(t.fimNaLinha, visFim)
+        let centro = larguraLinha > 0 && b > a ? (a + b) / 2 : (t.naLinha + t.fimNaLinha) / 2
+        return min(max(CGFloat(centro - t.naLinha) * zoom - w / 2, 0), largura - w)
+    }
+
+    /// Pegador do trecho selecionado: arrastar move o trecho pela linha do tempo.
     /// (Só ele recebe o arrasto, para o resto do trecho continuar rolando a linha do tempo.)
-    private func alcaMover(_ t: TrechoEdicao) -> some View {
+    private func alcaMover(_ t: TrechoEdicao, x: CGFloat) -> some View {
         Image(systemName: "arrow.left.and.right")
             .font(.caption.bold())
             .foregroundStyle(.black)
@@ -296,6 +321,7 @@ struct EditorVideoView: View {
                     .onChanged { g in
                         if movendo?.id != t.id {
                             registrar()
+                            pegaFixo = x            // o pegador anda junto com o trecho, sob o dedo
                             movendo = (t.id, t.naLinha)
                             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                         }
@@ -303,7 +329,7 @@ struct EditorVideoView: View {
                         mover(m.id, de: m.pos, delta: Double(g.translation.width / zoom))
                     }
                     .onEnded { _ in
-                        movendo = nil; grudadoEm = nil
+                        movendo = nil; grudadoEm = nil; pegaFixo = nil
                         Task { await atualizarPrevia() }
                     }
             )
@@ -347,18 +373,10 @@ struct EditorVideoView: View {
                     }
                 } label: { rotulo("Velocidade", "gauge.with.dots.needle.67percent") }
                 .buttonStyle(.glass)
-                Menu {
-                    Section("Neste trecho") {
-                        ForEach([1.0, 0.75, 0.5, 0.25, 0], id: \.self) { v in
-                            Button(v == 0 ? "Mudo" : "\(Int(v * 100))%") { mudarVolume(v, todos: false) }
-                        }
-                    }
-                    Section("Em tudo") {
-                        ForEach([1.0, 0.5, 0], id: \.self) { v in
-                            Button(v == 0 ? "Tudo mudo" : "Tudo \(Int(v * 100))%") { mudarVolume(v, todos: true) }
-                        }
-                    }
-                } label: { rotulo("Áudio", "speaker.wave.2") }
+                Button {
+                    painelVolume.toggle()
+                    if painelVolume { sincronizarVolume() }
+                } label: { rotulo("Volume", painelVolume ? "speaker.wave.2.fill" : "speaker.wave.2") }
                 .buttonStyle(.glass)
                 Menu {
                     Button("Mover para a esquerda", systemImage: "arrow.left") { if let id = alvo() { trocar(id, -1) } }
@@ -601,10 +619,74 @@ struct EditorVideoView: View {
         ajeitar()          // ficou mais longo: empurra os seguintes só o necessário
     }
 
-    private func mudarVolume(_ v: Double, todos: Bool) {
-        registrar()
-        if todos { for k in trechos.indices { trechos[k].volume = v } }
-        else if let k = indiceSelecionado() ?? indiceNoCursor() { trechos[k].volume = v }
+    /// Trecho que o painel de volume ajusta: o selecionado ou, sem seleção, o que está no cursor.
+    private var alvoVolume: UUID? {
+        guard let k = indiceSelecionado() ?? indiceNoCursor() else { return nil }
+        return trechos[k].id
+    }
+
+    private func sincronizarVolume() {
+        guard let id = alvoVolume, let t = trechos.first(where: { $0.id == id }) else { return }
+        volumeSlider = min(EscalaVolume.maximo, EscalaVolume.porcento(ganho: t.volume))
+    }
+
+    /// `s`: porcentagem na escala do ouvido (1 = 100%).
+    private func mudarVolume(porcento s: Double, todos: Bool) {
+        let g = EscalaVolume.ganho(porcento: s)
+        if todos {
+            guard trechos.contains(where: { abs($0.volume - g) > 1e-6 }) else { return }
+            registrar()
+            for k in trechos.indices { trechos[k].volume = g }
+        } else if let k = indiceSelecionado() ?? indiceNoCursor() {
+            guard abs(trechos[k].volume - g) > 1e-6 else { return }
+            registrar()
+            trechos[k].volume = g
+        }
+    }
+
+    private var painelDeVolume: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Text(alvoVolume.flatMap { id in trechos.firstIndex(where: { $0.id == id }) }.map { "Trecho \($0 + 1)" }
+                     ?? "Ponha o cursor num trecho")
+                    .font(.footnote.bold())
+                Spacer()
+                Text(EscalaVolume.texto(porcento: volumeSlider))
+                    .font(.footnote.monospacedDigit())
+                    .foregroundStyle(volumeSlider > 1.005 ? Color.orange : Color.white)
+                Button { painelVolume = false } label: { Image(systemName: "xmark").font(.footnote.bold()) }
+                    .buttonStyle(.plain).padding(.leading, 6)
+            }
+            HStack(spacing: 10) {
+                Image(systemName: "speaker.fill").font(.caption).foregroundStyle(Tema.texto2)
+                Slider(value: $volumeSlider, in: 0...EscalaVolume.maximo, onEditingChanged: { editando in
+                    if !editando { mudarVolume(porcento: volumeSlider, todos: false) }
+                })
+                .tint(volumeSlider > 1.005 ? Color.orange : Color.cyan)
+                Image(systemName: "speaker.wave.3.fill").font(.caption).foregroundStyle(Tema.texto2)
+            }
+            .disabled(alvoVolume == nil)
+            .onChange(of: volumeSlider) { _, v in
+                // gruda em 100% (o volume original)
+                if v != 1 && abs(v - 1) < 0.04 { volumeSlider = 1; UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+            }
+            HStack(spacing: 8) {
+                Button("Mudo") { volumeSlider = 0; mudarVolume(porcento: 0, todos: false) }
+                Button("100%") { volumeSlider = 1; mudarVolume(porcento: 1, todos: false) }
+                Spacer()
+                Button("Usar em todos") { mudarVolume(porcento: volumeSlider, todos: true) }
+            }
+            .font(.footnote)
+            .buttonStyle(.glass)
+            .disabled(alvoVolume == nil)
+            if volumeSlider > 1.005 {
+                Text("Acima de 100% um limitador segura os picos para o som não estourar.")
+                    .font(.caption2).foregroundStyle(Tema.texto2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.horizontal).padding(.vertical, 10)
+        .background(Color(white: 0.11))
     }
 
     private func alternar() {
@@ -621,7 +703,7 @@ struct EditorVideoView: View {
         let t = trechos[k]
         var r = "Trecho \(k + 1)"
         if abs(t.velocidade - 1) > 0.001 { r += " · " + Velocidade.nome(t.velocidade) }
-        if t.volume < 0.999 { r += t.volume == 0 ? " · mudo" : " · \(Int(t.volume * 100))%" }
+        if abs(t.volume - 1) > 0.001 { r += t.volume == 0 ? " · mudo" : " · " + EscalaVolume.texto(ganho: t.volume) }
         return r
     }
 
@@ -784,9 +866,11 @@ struct OndaTrecho: View {
                 let ini = a + (b - a) * i / barras, fim = max(ini + 1, a + (b - a) * (i + 1) / barras)
                 var m: Float = 0
                 for k in ini..<min(fim, onda.count) { m = max(m, onda[k]) }
-                let h = max(1, CGFloat(m) * tam.height)
+                // a onda acompanha o volume (mudo mostra a original, apagada); laranja = limitador agindo
+                let v = m * (trecho.volume == 0 ? 1 : Float(trecho.volume))
+                let h = max(1, CGFloat(min(1, v)) * tam.height)
                 let r = CGRect(x: CGFloat(i) * 3, y: (tam.height - h) / 2, width: 2, height: h)
-                ctx.fill(Path(r), with: .color(.cyan.opacity(0.8)))
+                ctx.fill(Path(r), with: .color(v > 0.966 && trecho.volume > 1.0001 ? .orange : .cyan.opacity(0.8)))
             }
         }
     }
@@ -809,7 +893,7 @@ struct FolhaGravarEdicao: View {
 
     private var podeSemRegravar: Bool {
         trechos.count == 1 && trechos[0].naLinha < 0.01
-            && abs(trechos[0].velocidade - 1) < 0.001 && trechos[0].volume > 0.999
+            && abs(trechos[0].velocidade - 1) < 0.001 && abs(trechos[0].volume - 1) < 0.001
     }
     private var duracao: Double { ProjetoEdicao(fontes: [], trechos: trechos).duracao }
 
@@ -910,5 +994,52 @@ struct FolhaGravarEdicao: View {
         var oc = o
         oc.acao = .video; oc.enquadramento = nil
         return PlanoConversao.dimensoes(i, oc)
+    }
+}
+
+
+// MARK: - ímã
+
+/// Ímã em ferradura, só o contorno: branco ligado, apagado e riscado desligado.
+struct IconeIma: View {
+    let ligado: Bool
+
+    var body: some View {
+        ZStack {
+            FormaIma()
+                .stroke(Color.white.opacity(ligado ? 1 : 0.4), style: StrokeStyle(lineWidth: 1.6, lineJoin: .round))
+                .rotationEffect(.degrees(45))
+            if !ligado {
+                Path { p in p.move(to: CGPoint(x: 2, y: 2)); p.addLine(to: CGPoint(x: 20, y: 20)) }
+                    .stroke(Color.white.opacity(0.7), style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+            }
+        }
+        .frame(width: 22, height: 22)
+        .contentShape(Rectangle())
+        .accessibilityLabel(ligado ? "Ímã ligado" : "Ímã desligado")
+    }
+}
+
+/// Contorno de um ímã em U (aberto para cima), com a marca dos polos nas pontas. Desenhado numa grade 20×20.
+struct FormaIma: Shape {
+    func path(in r: CGRect) -> Path {
+        let e = min(r.width, r.height) / 20
+        let ox = r.midX - 10 * e, oy = r.midY - 10 * e
+        func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: ox + x * e, y: oy + y * e) }
+        let c = pt(10, 10.5)
+        var p = Path()
+        p.move(to: pt(2.5, 2))
+        p.addLine(to: pt(2.5, 10.5))
+        p.addArc(center: c, radius: 7.5 * e, startAngle: .degrees(180), endAngle: .degrees(0), clockwise: true)
+        p.addLine(to: pt(17.5, 2))
+        p.addLine(to: pt(13, 2))
+        p.addLine(to: pt(13, 10.5))
+        p.addArc(center: c, radius: 3 * e, startAngle: .degrees(0), endAngle: .degrees(180), clockwise: false)
+        p.addLine(to: pt(7, 2))
+        p.closeSubpath()
+        // polos
+        p.move(to: pt(2.5, 5.5)); p.addLine(to: pt(7, 5.5))
+        p.move(to: pt(13, 5.5)); p.addLine(to: pt(17.5, 5.5))
+        return p
     }
 }

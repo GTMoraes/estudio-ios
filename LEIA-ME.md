@@ -263,6 +263,14 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
   trecho num arquivo, só o áudio (M4A) ou sem regravar (um trecho, sem velocidade/volume). O resultado guarda
   a edição: "Editar de novo" reabre com os vídeos guardados em Originais. As fontes entram no trabalho por
   ligação direta ao arquivo (sem ocupar espaço de novo).
+- 0.19.3: **volume do editor com slider** (0% a 200%) na escala do ouvido: cada 10 dB soa como o dobro/metade,
+  então 50% = -10 dB, 25% = -20 dB, 200% = +10 dB (`EscalaVolume`; `TrechoEdicao.volume` continua sendo ganho de
+  amplitude, projetos antigos valem). Antes 25/50/75% eram de amplitude (-12/-6/-2,5 dB) e quase não mudavam
+  nada. `ProcessadorGanho` aplica volume e, acima de 100%, um limitador (teto -0,3 dBFS, ataque imediato,
+  soltura 80 ms) na gravação (amostras) e na prévia (MTAudioProcessingTap: o mixer não aceita volume > 1). A onda
+  do trecho acompanha o volume (laranja onde o limitador age). Botão "Volume" abre o painel (Mudo, 100%, Usar em
+  todos; gruda em 100%). Pegador de mover fica no meio da parte **visível** do trecho e anda junto ao arrastar.
+  Ímã virou ícone de ferradura vazado (branco ligado; apagado e riscado desligado).
 - 0.19.2: gestos do editor. Tocar num trecho seleciona (antes o "segurar" do mover e o menu de contexto
   engoliam o toque); a linha do tempo rola com o dedo em cima dos trechos; mover passou para o **pegador
   ciano** no topo do trecho selecionado (o menu de contexto saiu; Duplicar/Remover/etc. continuam na barra e
