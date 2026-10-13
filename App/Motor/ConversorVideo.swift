@@ -843,7 +843,8 @@ enum Bombeador {
     static func bombear(reader: AVAssetReader, writer: AVAssetWriter,
                         pares: [(AVAssetReaderOutput, AVAssetWriterInput)],
                         inicio: CMTime, duracao: Double, cancel: Cancelamento,
-                        progresso: @escaping ConversorVideo.Progresso, quadro: CMTime? = nil) async throws {
+                        progresso: @escaping ConversorVideo.Progresso, quadro: CMTime? = nil,
+                        ajustes: [Int: @Sendable (CMSampleBuffer) -> CMSampleBuffer] = [:]) async throws {
         guard reader.startReading() else {
             throw ErroApp("Falha ao ler: \(reader.error?.localizedDescription ?? "desconhecida")")
         }
@@ -868,7 +869,7 @@ enum Bombeador {
                         if cancel.cancelado || reader.status == .failed || reader.status == .cancelled {
                             entrada.markAsFinished(); fim.valor = true; grupo.leave(); return
                         }
-                        let amostra: CMSampleBuffer
+                        var amostra: CMSampleBuffer
                         if let grade, !grade.fila.isEmpty {
                             amostra = grade.fila.removeFirst()
                         } else {
@@ -883,6 +884,7 @@ enum Bombeador {
                                 amostra = lida
                             }
                         }
+                        if let ajuste = ajustes[k] { amostra = ajuste(amostra) }   // ex.: volume do editor
                         if k == 0, duracao > 0 {
                             let t = CMTimeGetSeconds(CMTimeSubtract(CMSampleBufferGetPresentationTimeStamp(amostra), inicio))
                             // avisa a cada 0,5% (um aviso por quadro inundaria o ator principal)

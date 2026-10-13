@@ -21,6 +21,7 @@ struct EditorVideoView: View {
     @State private var fontes: [URL] = []
     @State private var nomes: [String] = []
     @State private var duracoes: [Double] = []
+    /// Sempre com posição e na ordem da linha do tempo.
     @State private var trechos: [TrechoEdicao] = []
     @State private var desfazer: [[TrechoEdicao]] = []
     @State private var refazer: [[TrechoEdicao]] = []
@@ -33,23 +34,30 @@ struct EditorVideoView: View {
     @State private var posicao = ScrollPosition(edge: .leading)
     @State private var rolando = false
     @State private var ondas: [Int: [Float]] = [:]
-    @State private var aparando: (id: UUID, inicio: Double, fim: Double)?
+    @State private var aparando: (id: UUID, inicio: Double, fim: Double, pos: Double)?
+    @State private var movendo: (id: UUID, pos: Double)?
+    @State private var ima = true
+    @State private var grudadoEm: Double?
+    @State private var espacoTocado: Espaco?
+    @State private var versaoPrevia = 0
     @State private var aviso: String?
     @State private var gravar = false
     @State private var confirmarSaida = false
     @State private var escolhendoArquivo = false
     @State private var galeria: [PhotosPickerItem] = []
+    @State private var mostrarGaleria = false
     @State private var carregado = false
     @State private var convertendo: String?
     @State private var progressoConversao: Double = 0
 
+    struct Espaco: Identifiable { let id = UUID(); let inicio: Double; let fim: Double }
+
     private let relogio = Timer.publish(every: 1.0 / 30, on: .main, in: .common).autoconnect()
 
-    private var total: Double { trechos.reduce(0) { $0 + $1.duracao } }
-    private var inicios: [Double] {
-        var t = 0.0
-        return trechos.map { let i = t; t += $0.duracao; return i }
-    }
+    /// Fim do último trecho.
+    private var total: Double { trechos.map { $0.fimNaLinha }.max() ?? 0 }
+    /// Largura da linha do tempo: um pouco além do fim, para dar onde soltar trechos.
+    private var duracaoLinha: Double { total + max(5, total * 0.25) }
     private var mudou: Bool { !desfazer.isEmpty }
 
     var body: some View {
@@ -70,9 +78,16 @@ struct EditorVideoView: View {
                     }
                 }
                 ToolbarItemGroup(placement: .principal) {
-                    HStack(spacing: 18) {
+                    HStack(spacing: 16) {
                         Button { voltar() } label: { Image(systemName: "arrow.uturn.backward") }.disabled(desfazer.isEmpty)
                         Button { avancar() } label: { Image(systemName: "arrow.uturn.forward") }.disabled(refazer.isEmpty)
+                        Button { ima.toggle() } label: {
+                            Text("Ímã").font(.footnote.bold())
+                                .padding(.horizontal, 8).padding(.vertical, 3)
+                                .background(ima ? Color.yellow : Color.white.opacity(0.15), in: .capsule)
+                                .foregroundStyle(ima ? Color.black : Color.white)
+                        }
+                        .accessibilityLabel(ima ? "Ímã ligado" : "Ímã desligado")
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
@@ -87,6 +102,13 @@ struct EditorVideoView: View {
             .alert("Aviso", isPresented: Binding(get: { aviso != nil }, set: { if !$0 { aviso = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: { Text(aviso ?? "") }
+            .confirmationDialog("Espaço vazio", isPresented: Binding(get: { espacoTocado != nil }, set: { if !$0 { espacoTocado = nil } }),
+                                titleVisibility: .visible) {
+                Button("Fechar espaço") { if let e = espacoTocado { fecharEspaco(e) } }
+                Button("Deixar", role: .cancel) {}
+            } message: {
+                Text("Espaço de \(String(format: "%.1f", (espacoTocado?.fim ?? 0) - (espacoTocado?.inicio ?? 0))) s: na gravação vira tela preta e silêncio.")
+            }
             .sheet(isPresented: $gravar) {
                 FolhaGravarEdicao(fontes: fontes, nomes: nomes, trechos: trechos) { opcoes, modo, base in
                     let p = ProjetoEdicao(fontes: fontes.map { $0.lastPathComponent }, trechos: trechos)
@@ -124,7 +146,8 @@ struct EditorVideoView: View {
                 }
             }
             .onChange(of: trechos) { _, _ in
-                guard aparando == nil else { return }       // arrastando a alça: monta a prévia só ao soltar
+                // arrastando uma alça ou um trecho: a prévia é montada só ao soltar
+                guard aparando == nil, movendo == nil else { return }
                 Task { await atualizarPrevia() }
             }
             .onDisappear { player.pause() }
@@ -175,24 +198,36 @@ struct EditorVideoView: View {
             let meia = g.size.width / 2
             ZStack {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 2) {
-                        Color.clear.frame(width: meia - 2)
-                        ForEach(Array(trechos.enumerated()), id: \.element.id) { k, t in
-                            bloco(k, t)
+                    HStack(spacing: 0) {
+                        Color.clear.frame(width: meia)
+                        ZStack(alignment: .topLeading) {
+                            // fundo: tocar num espaço vazio oferece "Fechar espaço"
+                            Color.white.opacity(0.001)
+                                .frame(width: CGFloat(duracaoLinha) * zoom, height: 92)
+                                .contentShape(Rectangle())
+                                .onTapGesture(coordinateSpace: .local) { p in
+                                    let t = Double(p.x / zoom)
+                                    if let e = espaco(em: t) { espacoTocado = e } else { selecionado = nil }
+                                }
+                            ForEach(Array(trechos.enumerated()), id: \.element.id) { k, t in
+                                bloco(k, t).offset(x: CGFloat(t.naLinha) * zoom)
+                            }
                         }
+                        .frame(width: CGFloat(duracaoLinha) * zoom, height: 92, alignment: .topLeading)
                         Color.clear.frame(width: meia)
                     }
                     .frame(height: 96)
                 }
                 .scrollPosition($posicao)
+                .scrollDisabled(movendo != nil || aparando != nil)
                 .onScrollPhaseChange { _, fase in
                     rolando = fase != .idle
                     if rolando && tocando { tocando = false; player.pause() }
                 }
                 .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.x } action: { _, x in
                     guard rolando else { return }
-                    tempo = min(max(0, Double(x / zoom)), total)
-                    buscar(tempo)
+                    tempo = min(max(0, Double(x / zoom)), duracaoLinha)
+                    buscar(min(tempo, total))
                 }
                 .simultaneousGesture(
                     MagnifyGesture()
@@ -214,6 +249,7 @@ struct EditorVideoView: View {
     @ViewBuilder private func bloco(_ k: Int, _ t: TrechoEdicao) -> some View {
         let largura = max(8, CGFloat(t.duracao) * zoom)
         let sel = t.id == selecionado
+        let arrastando = movendo?.id == t.id
         ZStack(alignment: .bottom) {
             MiniaturasTrecho(url: fontes.indices.contains(t.fonte) ? fontes[t.fonte] : nil, trecho: t, largura: largura)
                 .frame(width: largura, height: 64)
@@ -227,27 +263,48 @@ struct EditorVideoView: View {
         .background(Color(white: 0.16))
         .clipShape(.rect(cornerRadius: 6))
         .overlay {
-            RoundedRectangle(cornerRadius: 6).stroke(sel ? Color.yellow : Color.clear, lineWidth: 3)
+            RoundedRectangle(cornerRadius: 6).stroke(arrastando ? Color.cyan : (sel ? Color.yellow : Color.clear), lineWidth: 3)
         }
-        .overlay(alignment: .leading) { if sel { alca(t, inicio: true) } }
-        .overlay(alignment: .trailing) { if sel { alca(t, inicio: false) } }
+        .overlay(alignment: .leading) { if sel && !arrastando { alca(t, inicio: true) } }
+        .overlay(alignment: .trailing) { if sel && !arrastando { alca(t, inicio: false) } }
         .overlay(alignment: .topLeading) {
             if abs(t.velocidade - 1) > 0.001 {
                 Text(Velocidade.nome(t.velocidade)).font(.caption2.bold()).padding(3)
                     .background(.black.opacity(0.6), in: .rect(cornerRadius: 4)).padding(4)
             }
         }
+        .scaleEffect(arrastando ? 1.04 : 1)
         .contentShape(Rectangle())
         .onTapGesture { selecionado = sel ? nil : t.id }
+        // segurar e arrastar: move o trecho pela linha do tempo
+        .highPriorityGesture(
+            LongPressGesture(minimumDuration: 0.35)
+                .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .global))
+                .onChanged { v in
+                    guard case .second(true, let d) = v else { return }
+                    if movendo?.id != t.id {
+                        registrar()
+                        movendo = (t.id, t.naLinha)
+                        selecionado = t.id
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    }
+                    guard let m = movendo, let d else { return }
+                    mover(m.id, de: m.pos, delta: Double(d.translation.width / zoom))
+                }
+                .onEnded { _ in
+                    if movendo != nil { movendo = nil; grudadoEm = nil; Task { await atualizarPrevia() } }
+                }
+        )
         .contextMenu {
-            Button("Mover para a esquerda", systemImage: "arrow.left") { mover(t.id, -1) }.disabled(k == 0)
-            Button("Mover para a direita", systemImage: "arrow.right") { mover(t.id, 1) }.disabled(k == trechos.count - 1)
+            Button("Mover para a esquerda", systemImage: "arrow.left") { trocar(t.id, -1) }.disabled(k == 0)
+            Button("Mover para a direita", systemImage: "arrow.right") { trocar(t.id, 1) }.disabled(k == trechos.count - 1)
             Button("Duplicar", systemImage: "plus.square.on.square") { duplicar(t.id) }
             Button("Remover", systemImage: "trash", role: .destructive) { remover(t.id) }.disabled(trechos.count < 2)
         }
     }
 
-    /// Alça para aparar o começo ou o fim do trecho (arrasto em coordenadas da tela).
+    /// Alça para aparar o começo ou o fim do trecho. O começo "come" o vídeo pela esquerda (a borda
+    /// anda e fica espaço vazio antes); dá para estender até o começo/fim do vídeo original.
     private func alca(_ t: TrechoEdicao, inicio: Bool) -> some View {
         RoundedRectangle(cornerRadius: 3).fill(Color.yellow)
             .frame(width: 14, height: 92)
@@ -257,18 +314,12 @@ struct EditorVideoView: View {
                     .onChanged { g in
                         if aparando?.id != t.id {
                             registrar()
-                            aparando = (t.id, t.inicio, t.fim)
+                            aparando = (t.id, t.inicio, t.fim, t.naLinha)
                         }
-                        guard let a = aparando, let k = trechos.firstIndex(where: { $0.id == t.id }) else { return }
-                        let delta = Double(g.translation.width / zoom) * trechos[k].velocidade
-                        let maximo = duracoes.indices.contains(trechos[k].fonte) ? duracoes[trechos[k].fonte] : a.fim
-                        if inicio {
-                            trechos[k].inicio = min(max(0, a.inicio + delta), trechos[k].fim - 0.1)
-                        } else {
-                            trechos[k].fim = max(min(maximo, a.fim + delta), trechos[k].inicio + 0.1)
-                        }
+                        guard let a = aparando else { return }
+                        aparar(a, inicio: inicio, delta: Double(g.translation.width / zoom))
                     }
-                    .onEnded { _ in aparando = nil; Task { await atualizarPrevia() } }
+                    .onEnded { _ in aparando = nil; grudadoEm = nil; Task { await atualizarPrevia() } }
             )
     }
 
@@ -302,9 +353,10 @@ struct EditorVideoView: View {
                 } label: { rotulo("Áudio", "speaker.wave.2") }
                 .buttonStyle(.glass)
                 Menu {
-                    Button("Mover para a esquerda", systemImage: "arrow.left") { if let id = alvo() { mover(id, -1) } }
-                    Button("Mover para a direita", systemImage: "arrow.right") { if let id = alvo() { mover(id, 1) } }
+                    Button("Mover para a esquerda", systemImage: "arrow.left") { if let id = alvo() { trocar(id, -1) } }
+                    Button("Mover para a direita", systemImage: "arrow.right") { if let id = alvo() { trocar(id, 1) } }
                     Button("Duplicar", systemImage: "plus.square.on.square") { if let id = alvo() { duplicar(id) } }
+                    Button("Fechar todos os espaços", systemImage: "arrow.left.to.line") { fecharTodosEspacos() }
                 } label: { rotulo("Ordem", "arrow.left.arrow.right") }
                 .buttonStyle(.glass)
                 Menu {
@@ -318,7 +370,6 @@ struct EditorVideoView: View {
         .photosPicker(isPresented: $mostrarGaleria, selection: $galeria, maxSelectionCount: 10, matching: .videos,
                       preferredItemEncoding: .current)
     }
-    @State private var mostrarGaleria = false
 
     private func ferramenta(_ titulo: String, _ icone: String, _ acao: @escaping () -> Void) -> some View {
         Button(action: acao) { rotulo(titulo, icone) }.buttonStyle(.glass)
@@ -331,6 +382,33 @@ struct EditorVideoView: View {
         }
         .frame(minWidth: 58)
         .padding(.vertical, 2)
+    }
+
+    // MARK: ímã
+
+    /// Pontos em que bordas grudam: começo da linha do tempo, cursor e as bordas dos outros trechos.
+    private func alvosIma(exceto id: UUID) -> [Double] {
+        var a: [Double] = [0, tempo]
+        for t in trechos where t.id != id { a.append(t.naLinha); a.append(t.fimNaLinha) }
+        return a
+    }
+
+    /// Com o ímã ligado, o ponto mais próximo de `x` (até ~12 pontos na tela); senão, nil.
+    private func grudar(_ x: Double, em alvos: [Double]) -> Double? {
+        guard ima else { return nil }
+        let limite = Double(12 / zoom)
+        var melhor: Double?
+        for a in alvos where abs(a - x) <= limite {
+            if melhor == nil || abs(a - x) < abs(melhor! - x) { melhor = a }
+        }
+        return melhor
+    }
+
+    private func vibrarSeGrudou(_ alvo: Double?) {
+        if let alvo, grudadoEm == nil || abs(grudadoEm! - alvo) > 0.0001 {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
+        grudadoEm = alvo
     }
 
     // MARK: ações
@@ -350,14 +428,23 @@ struct EditorVideoView: View {
         desfazer.append(trechos); trechos = p
     }
 
+    /// Põe na ordem da linha do tempo e empurra para a direita o que ficou sobreposto.
+    private func ajeitar() {
+        trechos.sort { $0.naLinha < $1.naLinha }
+        guard trechos.count > 1 else { return }
+        for j in 1..<trechos.count where trechos[j].naLinha < trechos[j - 1].fimNaLinha - 0.0001 {
+            trechos[j].posicao = trechos[j - 1].fimNaLinha
+        }
+    }
+
     private func indiceSelecionado() -> Int? {
         guard let s = selecionado else { return nil }
         return trechos.firstIndex { $0.id == s }
     }
+    /// Trecho sob o cursor (nil num espaço vazio).
     private func indiceNoCursor() -> Int? {
-        let ini = inicios
-        for k in trechos.indices.reversed() where tempo >= ini[k] - 0.0001 { return k }
-        return trechos.isEmpty ? nil : 0
+        trechos.firstIndex { tempo >= $0.naLinha - 0.0001 && tempo < $0.fimNaLinha - 0.0001 }
+            ?? trechos.lastIndex { abs(tempo - $0.fimNaLinha) < 0.0001 }
     }
     /// Trecho em que a ação vale: o selecionado ou o que está sob o cursor.
     private func alvo() -> UUID? {
@@ -365,10 +452,93 @@ struct EditorVideoView: View {
         return nil
     }
 
-    private func dividir() {
-        guard let k = indiceNoCursor() else { return }
+    private func espaco(em t: Double) -> Espaco? {
+        var fim = 0.0
+        for x in trechos {
+            if t >= fim && t < x.naLinha {
+                return x.naLinha - fim > 0.02 ? Espaco(inicio: fim, fim: x.naLinha) : nil
+            }
+            fim = max(fim, x.fimNaLinha)
+        }
+        return nil
+    }
+
+    private func fecharEspaco(_ e: Espaco) {
+        registrar()
+        let d = e.fim - e.inicio
+        for k in trechos.indices where trechos[k].naLinha >= e.fim - 0.0001 {
+            trechos[k].posicao = trechos[k].naLinha - d
+        }
+        ajeitar()
+        if tempo > e.fim { tempo -= d; buscar(tempo); posicao.scrollTo(x: CGFloat(tempo) * zoom) }
+    }
+
+    private func fecharTodosEspacos() {
+        registrar()
+        var fim = 0.0
+        for k in trechos.indices {
+            trechos[k].posicao = fim
+            fim = trechos[k].fimNaLinha
+        }
+    }
+
+    /// Arrasto do trecho inteiro: fica entre os vizinhos (não passa por cima deles).
+    private func mover(_ id: UUID, de pos0: Double, delta: Double) {
+        guard let k = trechos.firstIndex(where: { $0.id == id }) else { return }
+        let dur = trechos[k].duracao
+        let minimo = k > 0 ? trechos[k - 1].fimNaLinha : 0
+        let maximo = k + 1 < trechos.count ? trechos[k + 1].naLinha - dur : duracaoLinha
+        var novo = pos0 + delta
+        let alvos = alvosIma(exceto: id)
+        let gEsq = grudar(novo, em: alvos)
+        let gDir = grudar(novo + dur, em: alvos)
+        var grudou: Double?
+        if let a = gEsq, gDir == nil || abs(a - novo) <= abs(gDir! - (novo + dur)) { novo = a; grudou = a }
+        else if let b = gDir { novo = b - dur; grudou = b }
+        novo = min(max(minimo, novo), max(minimo, maximo))
+        vibrarSeGrudou(grudou)
+        trechos[k].posicao = novo
+    }
+
+    private func aparar(_ a: (id: UUID, inicio: Double, fim: Double, pos: Double), inicio: Bool, delta: Double) {
+        guard let k = trechos.firstIndex(where: { $0.id == a.id }) else { return }
         let t = trechos[k]
-        let corte = t.inicio + (tempo - inicios[k]) * t.velocidade
+        let vel = max(0.1, t.velocidade)
+        let maxFonte = duracoes.indices.contains(t.fonte) ? duracoes[t.fonte] : a.fim
+        var alvos = alvosIma(exceto: a.id)
+        if inicio {
+            // a borda direita fica parada; a esquerda anda junto com o começo do vídeo
+            let fimLinha = a.pos + (a.fim - a.inicio) / vel
+            if let c = t.corteInicio { alvos.append(a.pos + (c - a.inicio) / vel) }
+            var borda = a.pos + delta
+            let g = grudar(borda, em: alvos)
+            if let g { borda = g }
+            let minBorda = max(k > 0 ? trechos[k - 1].fimNaLinha : 0, a.pos - a.inicio / vel)
+            borda = min(max(borda, minBorda), fimLinha - 0.1 / vel)
+            vibrarSeGrudou(g)
+            trechos[k].inicio = a.inicio + (borda - a.pos) * vel
+            trechos[k].posicao = borda
+        } else {
+            if let c = t.corteFim { alvos.append(a.pos + (c - a.inicio) / vel) }
+            var borda = a.pos + (a.fim - a.inicio) / vel + delta
+            let g = grudar(borda, em: alvos)
+            if let g { borda = g }
+            let limite = k + 1 < trechos.count ? trechos[k + 1].naLinha : .infinity
+            let maxBorda = min(limite, a.pos + (maxFonte - a.inicio) / vel)
+            borda = max(min(borda, maxBorda), a.pos + 0.1 / vel)
+            vibrarSeGrudou(g)
+            trechos[k].fim = a.inicio + (borda - a.pos) * vel
+            trechos[k].posicao = a.pos
+        }
+    }
+
+    private func dividir() {
+        guard let k = indiceNoCursor() else {
+            aviso = "Ponha o cursor em cima de um trecho para dividir."
+            return
+        }
+        let t = trechos[k]
+        let corte = t.inicio + (tempo - t.naLinha) * t.velocidade
         guard corte - t.inicio > 0.05, t.fim - corte > 0.05 else {
             aviso = "Ponha o cursor no meio de um trecho para dividir."
             return
@@ -376,40 +546,51 @@ struct EditorVideoView: View {
         registrar()
         var a = t, b = t
         a.id = UUID(); b.id = UUID()
-        a.fim = corte; b.inicio = corte
+        a.fim = corte; a.corteFim = corte
+        b.inicio = corte; b.corteInicio = corte
+        b.posicao = a.fimNaLinha
         trechos.replaceSubrange(k...k, with: [a, b])
         selecionado = b.id
     }
 
+    /// Remove o trecho e deixa o espaço vazio no lugar.
     private func remover(_ id: UUID) {
         guard trechos.count > 1, let k = trechos.firstIndex(where: { $0.id == id }) else { return }
         registrar()
         trechos.remove(at: k)
         selecionado = nil
-        tempo = min(tempo, total)
-        buscar(tempo)
-        posicao.scrollTo(x: CGFloat(tempo) * zoom)
+        tempo = min(tempo, duracaoLinha)
+        buscar(min(tempo, total))
     }
 
-    private func mover(_ id: UUID, _ passo: Int) {
+    /// Troca de lugar com o vizinho (o espaço que havia entre os dois continua entre eles).
+    private func trocar(_ id: UUID, _ passo: Int) {
         guard let k = trechos.firstIndex(where: { $0.id == id }) else { return }
         let n = k + passo
         guard n >= 0 && n < trechos.count else { return }
         registrar()
-        trechos.swapAt(k, n)
+        let i = min(k, n), j = max(k, n)
+        let espacoEntre = max(0, trechos[j].naLinha - trechos[i].fimNaLinha)
+        let inicio = trechos[i].naLinha
+        trechos[j].posicao = inicio
+        trechos[i].posicao = inicio + trechos[j].duracao + espacoEntre
+        ajeitar()
     }
 
     private func duplicar(_ id: UUID) {
         guard let k = trechos.firstIndex(where: { $0.id == id }) else { return }
         registrar()
         var c = trechos[k]; c.id = UUID()
+        c.posicao = trechos[k].fimNaLinha
         trechos.insert(c, at: k + 1)
+        ajeitar()
     }
 
     private func mudarVelocidade(_ v: Double) {
         guard let k = indiceSelecionado() ?? indiceNoCursor() else { return }
         registrar()
         trechos[k].velocidade = v
+        ajeitar()          // ficou mais longo: empurra os seguintes só o necessário
     }
 
     private func mudarVolume(_ v: Double, todos: Bool) {
@@ -428,6 +609,14 @@ struct EditorVideoView: View {
         player.seek(to: CMTime(seconds: t, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
     }
 
+    private func rotuloTrecho(_ k: Int) -> String {
+        let t = trechos[k]
+        var r = "Trecho \(k + 1)"
+        if abs(t.velocidade - 1) > 0.001 { r += " · " + Velocidade.nome(t.velocidade) }
+        if t.volume < 0.999 { r += t.volume == 0 ? " · mudo" : " · \(Int(t.volume * 100))%" }
+        return r
+    }
+
     // MARK: carregar e prévia
 
     private func carregar() async {
@@ -441,9 +630,15 @@ struct EditorVideoView: View {
         }
         duracoes = d
         if let p = aberto.projeto {
-            trechos = p.trechos
+            trechos = ProjetoEdicao.posicionados(p.trechos)
         } else {
-            trechos = fontes.indices.compactMap { k in d[k] > 0.05 ? TrechoEdicao(fonte: k, inicio: 0, fim: d[k]) : nil }
+            var fim = 0.0
+            trechos = fontes.indices.compactMap { k in
+                guard d[k] > 0.05 else { return nil }
+                let t = TrechoEdicao(fonte: k, inicio: 0, fim: d[k], posicao: fim, corteInicio: 0, corteFim: d[k])
+                fim += d[k]
+                return t
+            }
         }
         // zoom inicial: a edição inteira em ~3 telas
         let largura = UIScreen.main.bounds.width
@@ -459,6 +654,7 @@ struct EditorVideoView: View {
     private func acrescentar(_ urls: [URL]) async {
         guard !urls.isEmpty else { return }
         var novos: [TrechoEdicao] = []
+        var fim = total
         for original in urls {
             var u = original
             if let f = await Compatibilidade.problema(original) {
@@ -484,13 +680,15 @@ struct EditorVideoView: View {
             let s = (try? await AVURLAsset(url: u).load(.duration)).map { CMTimeGetSeconds($0) } ?? 0
             guard s.isFinite, s > 0.05 else { continue }
             fontes.append(u); nomes.append(u.lastPathComponent); duracoes.append(s)
-            novos.append(TrechoEdicao(fonte: fontes.count - 1, inicio: 0, fim: s))
+            novos.append(TrechoEdicao(fonte: fontes.count - 1, inicio: 0, fim: s, posicao: fim, corteInicio: 0, corteFim: s))
+            fim += s
             let k = fontes.count - 1
             Task { let o = await AmostrasEdicao.shared.onda(u); ondas[k] = o }
         }
         guard !novos.isEmpty else { return }
         registrar()
         trechos += novos
+        ajeitar()
     }
 
     private func copiarDeFora(_ u: URL) -> URL? {
@@ -500,32 +698,29 @@ struct EditorVideoView: View {
         return (try? FileManager.default.copyItem(at: u, to: destino)) != nil ? destino : nil
     }
 
+    /// Remonta a prévia. Só a montagem mais recente vale (uma mais antiga que termine depois é descartada).
     private func atualizarPrevia() async {
-        guard !trechos.isEmpty, let primeiro = trechos.first, fontes.indices.contains(primeiro.fonte) else { return }
+        versaoPrevia += 1
+        let minha = versaoPrevia
+        let lista = trechos
+        guard let primeiro = lista.first, fontes.indices.contains(primeiro.fonte) else { return }
         do {
             let tam = (try await MontagemEdicao.tamanhoExibicao(AVURLAsset(url: fontes[primeiro.fonte]))) ?? CGSize(width: 1280, height: 720)
             let escala = min(1, 1280 / max(tam.width, tam.height))
             let tela = CGSize(width: max(2, (tam.width * escala / 2).rounded() * 2), height: max(2, (tam.height * escala / 2).rounded() * 2))
-            let m = try await MontagemEdicao.montar(fontes: fontes, trechos: trechos, tela: tela, fps: 30, cor: nil)
+            let m = try await MontagemEdicao.montar(fontes: fontes, trechos: lista, tela: tela, fps: 30, cor: nil)
+            guard minha == versaoPrevia else { return }
             let item = AVPlayerItem(asset: m.composicao)
             item.videoComposition = m.videoComposition
             item.audioMix = m.audioMix
             item.audioTimePitchAlgorithm = .spectral
             player.replaceCurrentItem(with: item)
-            tempo = min(tempo, total)
-            buscar(tempo)
+            buscar(min(tempo, total))
             if tocando { player.play() }
         } catch {
+            guard minha == versaoPrevia else { return }
             aviso = "Não consegui montar a prévia: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
         }
-    }
-
-    private func rotuloTrecho(_ k: Int) -> String {
-        let t = trechos[k]
-        var r = "Trecho \(k + 1)"
-        if abs(t.velocidade - 1) > 0.001 { r += " · " + Velocidade.nome(t.velocidade) }
-        if t.volume < 0.999 { r += t.volume == 0 ? " · mudo" : " · \(Int(t.volume * 100))%" }
-        return r
     }
 
     private func relogioTexto(_ s: Double) -> String {
@@ -605,9 +800,10 @@ struct FolhaGravarEdicao: View {
     @State private var base = ""
 
     private var podeSemRegravar: Bool {
-        trechos.count == 1 && abs(trechos[0].velocidade - 1) < 0.001 && trechos[0].volume > 0.999
+        trechos.count == 1 && trechos[0].naLinha < 0.01
+            && abs(trechos[0].velocidade - 1) < 0.001 && trechos[0].volume > 0.999
     }
-    private var duracao: Double { trechos.reduce(0) { $0 + $1.duracao } }
+    private var duracao: Double { ProjetoEdicao(fontes: [], trechos: trechos).duracao }
 
     var body: some View {
         NavigationStack {
@@ -689,8 +885,11 @@ struct FolhaGravarEdicao: View {
 
     private var textoModo: String {
         switch modo {
-        case .video, .semRecodificar: return "Todos os trechos num vídeo só, na ordem da linha do tempo."
-        case .separados: return "Cada trecho vira um vídeo separado (\(trechos.count) arquivos)."
+        case .video, .semRecodificar:
+            return ProjetoEdicao.temEspacos(trechos)
+                ? "Todos os trechos num vídeo só, como na linha do tempo. Os espaços vazios viram tela preta e silêncio."
+                : "Todos os trechos num vídeo só, como na linha do tempo."
+        case .separados: return "Cada trecho vira um vídeo separado (\(trechos.count) arquivos); os espaços não entram."
         case .audio: return "Só o som da edição, em M4A (AAC)."
         }
     }

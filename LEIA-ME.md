@@ -263,6 +263,16 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
   trecho num arquivo, só o áudio (M4A) ou sem regravar (um trecho, sem velocidade/volume). O resultado guarda
   a edição: "Editar de novo" reabre com os vídeos guardados em Originais. As fontes entram no trabalho por
   ligação direta ao arquivo (sem ocupar espaço de novo).
+- 0.19.1: editor com **linha do tempo livre**: cada trecho tem posição própria (`TrechoEdicao.posicao`; projetos
+  da 0.19.0 abrem com os trechos em sequência). Aparar o começo come o vídeo pela esquerda e deixa espaço vazio;
+  as alças estendem além do recorte até o começo/fim do vídeo original; Remover deixa o espaço; segurar e arrastar
+  move o trecho entre os vizinhos; tocar num espaço oferece "Fechar espaço" (e Ordem › "Fechar todos os
+  espaços"); velocidade e Duplicar empurram os seguintes só o necessário. **Ímã** (botão ao lado de
+  Desfazer/Refazer): bordas grudam no recorte original (`corteInicio/corteFim`), nas bordas dos vizinhos, no
+  cursor e no início, com vibração. Na gravação os espaços viram tela preta e silêncio (grade fixa de quadros
+  quando há espaços). **Volume**: o AVAudioMix não era aplicado (nem na prévia nem na gravação); agora o trecho
+  mudo nem leva o som, e o volume parcial é aplicado nas amostras na gravação (`GanhoAudio`, via
+  `Bombeador.bombear(ajustes:)`) e por rampas na prévia. A prévia descarta montagens antigas que terminem depois.
 - 0.14.0: o seletor de idioma ficou. Sem ele, um vídeo em outra língua seria tratado como português.
 
 ## Correções (0.11.1)
