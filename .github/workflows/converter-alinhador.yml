@@ -1,0 +1,51 @@
+name: Converter alinhador
+
+# Só roda quando você manda (aba Actions > "Converter alinhador" > Run workflow).
+on:
+  workflow_dispatch:
+
+jobs:
+  converter:
+    runs-on: macos-26
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar ferramentas
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch==2.6.0 "transformers<5" coremltools numpy
+          pip freeze | grep -iE "torch|transformers|coremltools|numpy" | tee versoes.txt
+
+      - name: Converter e conferir
+        run: |
+          set -o pipefail
+          python testes/alinhador/converter.py 2>&1 | tee conversao.log
+
+      - name: Compilar para o iPhone
+        run: |
+          xcrun coremlcompiler compile saida/Alinhador.mlpackage saida/Alinhador
+          du -sh saida/Alinhador/* | tee -a saida/relatorio.txt
+
+      - name: Guardar o alinhador convertido
+        uses: actions/upload-artifact@v4
+        with:
+          name: alinhador-coreml
+          path: saida/Alinhador
+          if-no-files-found: error
+
+      - name: Guardar relatórios
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: alinhador-relatorios
+          path: |
+            versoes.txt
+            conversao.log
+            saida/relatorio.txt
+            saida/alinhado-pytorch.json
+          if-no-files-found: warn
