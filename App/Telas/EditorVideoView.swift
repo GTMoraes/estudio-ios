@@ -812,13 +812,23 @@ struct EditorVideoView: View {
         let usadas = Array(Set(trechos.map { $0.fonte })).sorted()
         let urls = fontes
         cortando = "Preparando"; progressoCorte = nil
-        UIApplication.shared.isIdleTimerDisabled = true      // a GPU só trabalha com o app na frente e a tela ligada
+        let dono = UUID()
         tarefaCorte = Task {
+            var pegouAVez = false
             defer {
-                cortando = nil; progressoCorte = nil; tarefaCorte = nil; ServicoCorte.shared.liberar()
-                UIApplication.shared.isIdleTimerDisabled = false
+                cortando = nil; progressoCorte = nil; tarefaCorte = nil
+                // só solta o modelo se chegou a usá-lo (senão soltaria o de um corte que está rodando)
+                if pegouAVez { ServicoCorte.shared.liberar() }
+                estudio.liberarVezDoEditor(dono)       // a tela pode voltar a apagar
             }
             do {
+                // um trabalho pesado por vez: espera tratar voz, transcrição etc. terminarem
+                try await estudio.aguardarVezDoEditor(dono) { pos in
+                    cortando = pos <= 1 ? "Na fila: começa quando o trabalho atual terminar"
+                                        : "Na fila (\(pos)º): começa quando os anteriores terminarem"
+                }
+                pegouAVez = true
+                cortando = "Preparando"
                 var novas: [CorteProposto] = []
                 var alinhou = true
                 for (n, k) in usadas.enumerated() where urls.indices.contains(k) {

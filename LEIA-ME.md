@@ -263,6 +263,15 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
   trecho num arquivo, só o áudio (M4A) ou sem regravar (um trecho, sem velocidade/volume). O resultado guarda
   a edição: "Editar de novo" reabre com os vídeos guardados em Originais. As fontes entram no trabalho por
   ligação direta ao arquivo (sem ocupar espaço de novo).
+- 0.21.6: fila de trabalhos corrigida. (1) Sair do app só marca "Pausado" no que está rodando; quem espera a vez
+  continua "Na fila" e, ao voltar, reescreve a posição (`repintarFila`). (2) Falha por sair do app só conta se foi
+  DEPOIS de o trabalho pegar a vez (`geracaoDaVez`), não conta como tentativa (antes: 3 e erro). (3) Pedidos que
+  chegam juntos não se sobrescrevem mais (`entradaConcluida`). (4) Imagens com fila própria (`filaLeve`, só
+  processador) e Atividade ao Vivo só depois de pegar a vez; identificador novo a cada vez (registrar o mesmo de novo
+  derrubava o app no "Continuar"). (5) "Preparar tudo" entra na fila; o editor só solta o modelo se chegou a usá-lo.
+- 0.21.5: corte automático do editor entra na fila dos trabalhos pesados (`Estudio.aguardarVezDoEditor` /
+  `liberarVezDoEditor`, a mesma `aguardarVez` dos trabalhos): não roda junto com tratar voz, transcrição etc.
+  Enquanto espera, mostra a posição na fila. A tela fica acesa pelo `atualizarTela` (`editorNaVez`).
 - 0.21.4: prévia dos cortes sem salto: com "Prévia já cortada", a prévia é montada com os cortes ativos já
   aplicados (`EditorVideoView.cortado`, a mesma conta do "Aplicar cortes") e o cursor converte entre a linha do
   tempo e o relógio da prévia (`removidos`, `previaDaLinha`, `linhaDaPrevia`). Marcar/desmarcar remonta a prévia.

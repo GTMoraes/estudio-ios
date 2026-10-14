@@ -237,7 +237,7 @@ struct CartaoPreparar: View {
             BotaoPrincipal(titulo: prep.ocupado ? "Preparando…" : prep.tudoPronto ? "Tudo pronto" : "Preparar tudo",
                            icone: prep.tudoPronto ? "checkmark.circle.fill" : "bolt.fill",
                            desativado: prep.ocupado || prep.tudoPronto || estudio.processandoLocal) {
-                prep.preparar(Preparacao.Parte.allCases)
+                prep.preparar(Preparacao.Parte.allCases, estudio: estudio)
             }
             if estudio.processandoLocal && !prep.tudoPronto {
                 Text("Espere o trabalho atual terminar.").font(.footnote).foregroundStyle(Tema.texto2)
@@ -260,7 +260,7 @@ struct CartaoPreparar: View {
                 }
                 Spacer(minLength: 8)
                 if !pronto && prep.andamento[p] == nil {
-                    Button("Preparar") { prep.preparar([p]) }
+                    Button("Preparar") { prep.preparar([p], estudio: estudio) }
                         .buttonStyle(.glass)
                         .font(.footnote)
                         .disabled(prep.ocupado || estudio.processandoLocal)

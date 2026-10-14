@@ -76,11 +76,20 @@ final class Preparacao {
     func pronto(_ p: Parte) -> Bool { if case .pronto = estado(p) { return true }; return false }
     var tudoPronto: Bool { Parte.allCases.allSatisfy { pronto($0) } }
 
-    func preparar(_ partes: [Parte]) {
+    func preparar(_ partes: [Parte], estudio: Estudio? = nil) {
         guard !ocupado else { return }
         ocupado = true
         UIApplication.shared.isIdleTimerDisabled = true
         Task { @MainActor in
+            // entra na fila dos trabalhos pesados (carregar modelos junto com um trabalho estoura a memória)
+            let dono = UUID()
+            if let estudio, let primeira = partes.first(where: { !pronto($0) }) {
+                try? await estudio.aguardarVezDoEditor(dono) { pos in
+                    self.andamento[primeira] = Andamento(mensagem: pos <= 1 ? "Na fila: começa quando o trabalho atual terminar"
+                                                                            : "Na fila (\(pos)º)", fracao: nil)
+                }
+            }
+            defer { estudio?.liberarVezDoEditor(dono) }
             for p in partes where !pronto(p) {
                 erro[p] = nil
                 andamento[p] = Andamento(mensagem: "Começando", fracao: nil)

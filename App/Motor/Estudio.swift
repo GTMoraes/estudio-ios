@@ -83,7 +83,8 @@ final class Estudio {
             let prox = fila.removeFirst()
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 450_000_000)   // deixa a folha fechar
-                self.entrada = prox
+                // chegou outra coisa nesse meio tempo: ela abre agora e esta volta para a frente da fila
+                if self.entrada == nil { self.entrada = prox } else { self.fila.insert(prox, at: 0) }
             }
         }
     }
@@ -417,23 +418,21 @@ final class Estudio {
     private func rodar(_ id: UUID, segundoPlano: String? = nil, recomecar: Bool = false,
                        _ corpo: @escaping @MainActor () async throws -> Void) {
         descartar.remove(id)
-        if let titulo = segundoPlano {
-            // o sistema (ou você, pela Atividade ao Vivo) encerrou o segundo plano: no iPhone, para e
-            // fica para continuar; na nuvem, o trabalho segue lá e o app retoma ao voltar
-            SegundoPlano.shared.iniciar(id, titulo: titulo) { [weak self] in
-                guard let self, self.historico.item(id)?.naNuvem == false else { return }
-                self.pausar(id)
-            }
-        }
+        if let titulo = segundoPlano { iniciarSegundoPlano(id, titulo) }
         tarefas[id] = Task { @MainActor in
             var ok = false
             var tentativas = 0
             while true {
                 let geracao = EstadoApp.shared.geracao
+                self.geracaoDaVez[id] = nil
                 do { try await corpo(); ok = true; break }
                 catch is CancellationError { self.interrompido(id); break }
                 catch {
-                    if recomecar, tentativas < 3, EstadoApp.shared.geracao != geracao, !Task.isCancelled {
+                    // falhou porque o app saiu da frente DEPOIS de o trabalho começar de fato (a espera
+                    // na fila não conta)? Então espera voltar e recomeça; não conta como tentativa.
+                    let inicio = self.geracaoDaVez[id] ?? geracao
+                    let saiu = !EstadoApp.shared.ativo || EstadoApp.shared.geracao != inicio
+                    if recomecar, saiu, tentativas < 20, !Task.isCancelled {
                         tentativas += 1
                         self.etapa(id, "Pausado: volte ao Estúdio para continuar")
                         await EstadoApp.shared.aguardarAtivo()
@@ -450,6 +449,15 @@ final class Estudio {
             self.atualizarTela()
         }
         atualizarTela()
+    }
+
+    /// O sistema (ou você, pela Atividade ao Vivo) encerrou o segundo plano: no iPhone, para e fica
+    /// para continuar; na nuvem, o trabalho segue lá e o app retoma ao voltar.
+    private func iniciarSegundoPlano(_ id: UUID, _ titulo: String) {
+        SegundoPlano.shared.iniciar(id, titulo: titulo) { [weak self] in
+            guard let self, self.historico.item(id)?.naNuvem == false else { return }
+            self.pausar(id)
+        }
     }
 
     /// Cancelado: pelo botão (descarta) ou pelo sistema (fica para continuar depois).
@@ -477,24 +485,38 @@ final class Estudio {
     // e disputam a GPU/Neural Engine). Os trabalhos na nuvem não entram na fila.
     private var filaLocal: [UUID] = []
     private var vezDe: UUID?
+    // imagens: só processador, fila própria (não esperam nem fazem esperar os trabalhos de GPU)
+    private var filaLeve: [UUID] = []
+    private var vezLeve: UUID?
+    /// Geração do app (EstadoApp) quando o trabalho pegou a vez: falha depois de sair da tela = pausa.
+    private var geracaoDaVez: [UUID: Int] = [:]
+    /// Soma 1 quando o app volta: quem está na fila reescreve "Na fila" (sair do app escreve "Pausado").
+    private var repintarFila = 0
 
     /// Espera a vez de usar o iPhone. Cancelável (o Task.sleep lança ao cancelar).
-    private func aguardarVez(_ id: UUID) async throws {
-        if vezDe == id { return }
-        if !filaLocal.contains(id) { filaLocal.append(id) }
+    private func aguardarVez(_ id: UUID, leve: Bool = false, aviso: ((Int) -> Void)? = nil) async throws {
+        let fila: ReferenceWritableKeyPath<Estudio, [UUID]> = leve ? \.filaLeve : \.filaLocal
+        let vez: ReferenceWritableKeyPath<Estudio, UUID?> = leve ? \.vezLeve : \.vezDe
+        if self[keyPath: vez] == id { geracaoDaVez[id] = EstadoApp.shared.geracao; return }
+        if !self[keyPath: fila].contains(id) { self[keyPath: fila].append(id) }
         var ultimaPos = -1
+        var pintada = repintarFila
         while true {
             try Task.checkCancellation()
-            if vezDe == nil, filaLocal.first == id {
-                filaLocal.removeFirst()
-                vezDe = id
+            if self[keyPath: vez] == nil, self[keyPath: fila].first == id {
+                self[keyPath: fila].removeFirst()
+                self[keyPath: vez] = id
+                geracaoDaVez[id] = EstadoApp.shared.geracao
                 return
             }
-            let pos = (filaLocal.firstIndex(of: id) ?? 0) + (vezDe == nil ? 0 : 1)
-            if pos != ultimaPos {
+            let pos = (self[keyPath: fila].firstIndex(of: id) ?? 0) + (self[keyPath: vez] == nil ? 0 : 1)
+            if pos != ultimaPos || pintada != repintarFila {
                 ultimaPos = pos
-                etapa(id, pos <= 1 ? "Na fila: começa quando o trabalho atual terminar"
-                                   : "Na fila (\(pos)º): começa quando os anteriores terminarem")
+                pintada = repintarFila
+                if let aviso { aviso(pos) } else {
+                    etapa(id, pos <= 1 ? "Na fila: começa quando o trabalho atual terminar"
+                                       : "Na fila (\(pos)º): começa quando os anteriores terminarem")
+                }
             }
             try await Task.sleep(nanoseconds: 400_000_000)
         }
@@ -503,6 +525,26 @@ final class Estudio {
     private func liberarVez(_ id: UUID) {
         filaLocal.removeAll { $0 == id }
         if vezDe == id { vezDe = nil }
+        filaLeve.removeAll { $0 == id }
+        if vezLeve == id { vezLeve = nil }
+        geracaoDaVez[id] = nil
+    }
+
+    /// Corte automático do editor: entra na mesma fila dos trabalhos pesados (dois modelos juntos
+    /// estouram a memória). aviso(posição) enquanto espera.
+    private(set) var editorNaVez = false
+
+    func aguardarVezDoEditor(_ id: UUID, aviso: @escaping (Int) -> Void) async throws {
+        try await aguardarVez(id, aviso: aviso)
+        editorNaVez = true
+        atualizarTela()
+    }
+
+    func liberarVezDoEditor(_ id: UUID) {
+        let tinha = vezDe == id          // só quem pegou a vez apaga a marca (outro pode estar rodando)
+        liberarVez(id)
+        if tinha { editorNaVez = false }
+        atualizarTela()
     }
 
     /// Cancelar pelo app: para e apaga o que estava guardado para continuar.
@@ -525,7 +567,7 @@ final class Estudio {
 
     /// Tela sempre acesa enquanto houver trabalho no iPhone (fora da tela o iOS pausa o app).
     private func atualizarTela() {
-        UIApplication.shared.isIdleTimerDisabled = processandoLocal
+        UIApplication.shared.isIdleTimerDisabled = processandoLocal || editorNaVez
     }
 
     /// Trabalhos que o iOS interrompeu (app fechado): o aviso ao abrir oferece continuar.
@@ -536,9 +578,14 @@ final class Estudio {
         EstadoApp.shared.mudar(ativo: ativo)
         if ativo {
             Notificacoes.limpar()
+            repintarFila += 1                 // quem está só esperando a vez volta a mostrar "Na fila"
             return
         }
-        let locais = historico.itens.filter { !$0.naNuvem && $0.estado == .processando && tarefas[$0.id] != nil }
+        // só o que está rodando de fato pausa; quem está na fila continua só esperando
+        let locais = historico.itens.filter {
+            !$0.naNuvem && $0.estado == .processando && tarefas[$0.id] != nil
+                && !filaLocal.contains($0.id) && !filaLeve.contains($0.id)
+        }
         guard !locais.isEmpty else { return }
         // imagens e downloads do Drive seguem em segundo plano (Atividade ao Vivo)
         let seguem: (Item) -> Bool = { $0.tipo == .imagem || $0.tipo == .drive }
@@ -1256,8 +1303,10 @@ final class Estudio {
         guard let r0 = historico.item(id)?.retomada, let opcoes = r0.imagem else { return }
         let total = r0.entradas.count
         let inicio = Date()
-        rodar(id, segundoPlano: total == 1 ? "Convertendo 1 imagem" : "Convertendo \(total) imagens") {
-            try await self.aguardarVez(id)
+        let titulo = total == 1 ? "Convertendo 1 imagem" : "Convertendo \(total) imagens"
+        rodar(id) {
+            try await self.aguardarVez(id, leve: true)
+            self.iniciarSegundoPlano(id, titulo)      // só depois de pegar a vez (esperando, o iOS encerraria)
             guard let item = self.historico.item(id) else { return }
             try FileManager.default.createDirectory(at: item.pasta, withIntermediateDirectories: true)
             for k in 0..<total {

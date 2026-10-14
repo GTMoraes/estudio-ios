@@ -79,7 +79,8 @@ final class SegundoPlano {
 
     func iniciar(_ id: UUID, titulo: String, aoExpirar: @escaping @MainActor () -> Void) {
         guard let prefixo else { return }
-        let ident = prefixo + id.uuidString
+        // identificador novo a cada vez: registrar de novo o mesmo derruba o app ("Continuar" num trabalho)
+        let ident = prefixo + id.uuidString + "-" + String(UUID().uuidString.prefix(8))
         let ok = BGTaskScheduler.shared.register(forTaskWithIdentifier: ident, using: .main) { [weak self] task in
             guard let t = task as? BGContinuedProcessingTask else { task.setTaskCompleted(success: false); return }
             MainActor.assumeIsolated {
