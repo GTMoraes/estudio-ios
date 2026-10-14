@@ -48,7 +48,9 @@ final class Alinhador: @unchecked Sendable {
             throw ErroApp("O alinhador não está no iPhone.")
         }
         let c = MLModelConfiguration()
-        c.computeUnits = .cpuAndGPU
+        // processador: os pesos (1,2 GB, float32) ficam mapeados do arquivo em vez de copiados para a
+        // GPU; na GPU a memória do app passava do limite e o iOS fechava o app.
+        c.computeUnits = .cpuOnly
         modelo = try MLModel(contentsOf: u, configuration: c)
         guard let j = try JSONSerialization.jsonObject(with: Data(contentsOf: vu)) as? [String: Any],
               let v = j["vocab"] as? [String: Int], let b = j["branco"] as? Int, let s = j["separador"] as? Int else {

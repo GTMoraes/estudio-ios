@@ -754,8 +754,12 @@ struct EditorVideoView: View {
         let usadas = Array(Set(trechos.map { $0.fonte })).sorted()
         let urls = fontes
         cortando = "Preparando"; progressoCorte = nil
+        UIApplication.shared.isIdleTimerDisabled = true      // a GPU só trabalha com o app na frente e a tela ligada
         tarefaCorte = Task {
-            defer { cortando = nil; progressoCorte = nil; tarefaCorte = nil; ServicoCorte.shared.liberar() }
+            defer {
+                cortando = nil; progressoCorte = nil; tarefaCorte = nil; ServicoCorte.shared.liberar()
+                UIApplication.shared.isIdleTimerDisabled = false
+            }
             do {
                 var novas: [CorteProposto] = []
                 var alinhou = true
@@ -775,7 +779,12 @@ struct EditorVideoView: View {
                 if cortes.isEmpty { aviso = "Não achei nada para cortar." }
             } catch is CancellationError {
             } catch {
-                if !Task.isCancelled { aviso = "Corte automático: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)" }
+                if !Task.isCancelled {
+                    let msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                    aviso = msg.contains("Unable to compute the prediction")
+                        ? "Corte automático parou: a tela apagou ou o app saiu da frente, e o iPhone não deixa usar a GPU em segundo plano. Rode de novo com o app aberto (o que já foi transcrito fica guardado)."
+                        : "Corte automático: \(msg)"
+                }
             }
         }
     }

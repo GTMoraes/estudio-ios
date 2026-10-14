@@ -263,6 +263,10 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
   trecho num arquivo, só o áudio (M4A) ou sem regravar (um trecho, sem velocidade/volume). O resultado guarda
   a edição: "Editar de novo" reabre com os vídeos guardados em Originais. As fontes entram no trabalho por
   ligação direta ao arquivo (sem ocupar espaço de novo).
+- 0.21.3: o app fechava logo ao começar a alinhar (memória: o alinhador float32 na GPU copia 1,2 GB para a
+  GPU). Alinhador agora no processador (`.cpuOnly`: pesos mapeados do arquivo); Diagnóstico registra a memória antes
+  e depois. Editor: tela não apaga durante o corte automático; se o app sair da frente (GPU proibida em segundo plano),
+  aviso claro em vez de "Unable to compute the prediction".
 - 0.21.2: **conta do Reddit**. Desde 2025 o yt-dlp (old.reddit) pede conta e a página nova tem verificação
   anti-robô (8 KB sem o post). Ajustes › Reddit (mesmo cartão do Instagram, agora genérico: `SiteConta`,
   `CartaoConta`): login na página do Reddit dentro do app, "Concluir" manda só os cookies (exige `reddit_session`).

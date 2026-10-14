@@ -306,6 +306,7 @@ final class ServicoCorte: @unchecked Sendable {
         } else if ModeloAlinhador.pronto {
             progresso("Alinhando as palavras", 0)
             liberar()                                  // o CrisperWhisper não é mais preciso: libera a memória
+            Diagnostico.log("corte: memória antes do alinhador \(Memoria.agora() >> 20) MB")
             let ws = g.palavras
             let trabalho = Task.detached(priority: .userInitiated) {
                 try Alinhador().alinhar(ws, audio: audio) { p in progresso("Alinhando as palavras", p) }
@@ -313,6 +314,7 @@ final class ServicoCorte: @unchecked Sendable {
             do {
                 palavras = try await withTaskCancellationHandler { try await trabalho.value } onCancel: { trabalho.cancel() }
                 alinhado = true
+                Diagnostico.log("corte: alinhador ok, memória \(Memoria.agora() >> 20) MB")
                 g.alinhadas = palavras; g.versaoAlinhador = Alinhador.versao
                 TranscricoesGuardadas.gravar(g, para: url)
             } catch is CancellationError {
