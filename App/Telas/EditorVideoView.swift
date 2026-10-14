@@ -78,6 +78,13 @@ struct EditorVideoView: View {
 
     var body: some View {
         NavigationStack {
+            observadores(folhas(principal))
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    /// A tela, a barra e as folhas (dividido do `body` para o compilador conferir os tipos a tempo).
+    private var principal: some View {
             VStack(spacing: 0) {
                 previa
                 barraTempo
@@ -110,6 +117,11 @@ struct EditorVideoView: View {
                         .disabled(trechos.isEmpty)
                 }
             }
+    }
+
+    /// Avisos, confirmações, gravação e escolha de arquivos.
+    private func folhas(_ v: some View) -> some View {
+        v
             .alert("Sair sem gravar?", isPresented: $confirmarSaida) {
                 Button("Sair", role: .destructive) { fechar() }
                 Button("Continuar editando", role: .cancel) {}
@@ -150,6 +162,11 @@ struct EditorVideoView: View {
                     await acrescentar(urls)
                 }
             }
+    }
+
+    /// Carregar, relógio da prévia e reações às mudanças.
+    private func observadores(_ v: some View) -> some View {
+        v
             .task { await carregar() }
             .onReceive(relogio) { _ in
                 guard tocando, !rolando else { return }
@@ -172,8 +189,6 @@ struct EditorVideoView: View {
             .onChange(of: previaCortada) { _, _ in Task { await atualizarPrevia() } }
             .onChange(of: alvoVolume) { _, _ in sincronizarVolume() }
             .onDisappear { player.pause(); tarefaCorte?.cancel() }
-        }
-        .preferredColorScheme(.dark)
     }
 
     // MARK: prévia
