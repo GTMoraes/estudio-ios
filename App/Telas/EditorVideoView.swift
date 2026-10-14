@@ -50,6 +50,9 @@ struct EditorVideoView: View {
     @State private var tarefaCorte: Task<Void, Never>?
     @State private var previaCortada = true                // a prévia pula as marcas vermelhas
     @State private var cortesAlinhados = true              // os tempos vieram do alinhador
+    /// Prévia já cortada: trechos da linha do tempo que a prévia montada NÃO tem (marcas vermelhas ativas).
+    /// O player toca a montagem sem eles (sem salto); o cursor converte entre os dois relógios.
+    @State private var removidos: [ClosedRange<Double>] = []
     @State private var grudadoEm: Double?
     @State private var espacoTocado: Espaco?
     @State private var versaoPrevia = 0
@@ -150,14 +153,9 @@ struct EditorVideoView: View {
             .task { await carregar() }
             .onReceive(relogio) { _ in
                 guard tocando, !rolando else { return }
-                let t = CMTimeGetSeconds(player.currentTime())
-                if t.isFinite {
-                    if previaCortada, let fim = saltoEm(t), fim - t > 0.03 {
-                        if fim >= total - 0.02 { tocando = false; player.pause(); tempo = total; return }
-                        buscar(fim); tempo = fim
-                        posicao.scrollTo(x: CGFloat(fim) * zoom)
-                        return
-                    }
+                let p = CMTimeGetSeconds(player.currentTime())
+                if p.isFinite {
+                    let t = linhaDaPrevia(p)
                     tempo = min(t, total)
                     posicao.scrollTo(x: CGFloat(tempo) * zoom)
                     if t >= total - 0.02 { tocando = false; player.pause() }
@@ -170,6 +168,8 @@ struct EditorVideoView: View {
                 Task { await atualizarPrevia() }
             }
             .onChange(of: selecionado) { _, _ in movendo = nil; aparando = nil; grudadoEm = nil; pegaFixo = nil }
+            .onChange(of: cortes) { _, _ in Task { await atualizarPrevia() } }
+            .onChange(of: previaCortada) { _, _ in Task { await atualizarPrevia() } }
             .onChange(of: alvoVolume) { _, _ in sincronizarVolume() }
             .onDisappear { player.pause(); tarefaCorte?.cancel() }
         }
@@ -729,7 +729,50 @@ struct EditorVideoView: View {
     }
 
     private func buscar(_ t: Double) {
-        player.seek(to: CMTime(seconds: t, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        player.seek(to: CMTime(seconds: previaDaLinha(t), preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
+    /// Linha do tempo -> relógio da prévia (dentro de um corte ativo, vai para o fim dele).
+    private func previaDaLinha(_ t: Double) -> Double {
+        var tirado = 0.0
+        for r in removidos {
+            if t >= r.upperBound { tirado += r.upperBound - r.lowerBound }
+            else if t > r.lowerBound { return r.lowerBound - tirado }
+            else { break }
+        }
+        return t - tirado
+    }
+
+    /// Relógio da prévia -> linha do tempo.
+    private func linhaDaPrevia(_ p: Double) -> Double {
+        var t = p
+        for r in removidos {
+            if r.lowerBound <= t + 0.0005 { t += r.upperBound - r.lowerBound } else { break }
+        }
+        return t
+    }
+
+    /// Os cortes ativos, em segundos da linha do tempo (juntos quando encostam).
+    private func faixasRemovidas(_ lista: [TrechoEdicao]) -> [ClosedRange<Double>] {
+        let ativos = cortes.filter { !$0.manter }
+        guard !ativos.isEmpty else { return [] }
+        var r: [ClosedRange<Double>] = []
+        for tr in lista {
+            let v = max(0.1, tr.velocidade)
+            for c in ativos where c.fonte == tr.fonte && c.f > tr.inicio && c.i < tr.fim {
+                let a = tr.naLinha + (max(c.i, tr.inicio) - tr.inicio) / v
+                let b = tr.naLinha + (min(c.f, tr.fim) - tr.inicio) / v
+                if b > a { r.append(a...b) }
+            }
+        }
+        r.sort { $0.lowerBound < $1.lowerBound }
+        var juntas: [ClosedRange<Double>] = []
+        for x in r {
+            if let u = juntas.last, x.lowerBound <= u.upperBound + 0.02 {
+                juntas[juntas.count - 1] = u.lowerBound...max(u.upperBound, x.upperBound)
+            } else { juntas.append(x) }
+        }
+        return juntas
     }
 
     private func rotuloTrecho(_ k: Int) -> String {
@@ -789,21 +832,6 @@ struct EditorVideoView: View {
         }
     }
 
-    /// Na prévia cortada: se `t` (linha do tempo) cai numa marca vermelha, onde ela termina.
-    private func saltoEm(_ t: Double) -> Double? {
-        guard !cortes.isEmpty else { return nil }
-        for tr in trechos where t >= tr.naLinha && t < tr.fimNaLinha {
-            let v = max(0.1, tr.velocidade)
-            let fonteT = tr.inicio + (t - tr.naLinha) * v
-            var fim: Double?
-            for c in cortes where !c.manter && c.fonte == tr.fonte && fonteT >= c.i && fonteT < c.f {
-                fim = max(fim ?? 0, min(c.f, tr.fim))
-            }
-            if let f = fim { return tr.naLinha + (f - tr.inicio) / v }
-        }
-        return nil
-    }
-
     /// Marcas vermelhas dos cortes propostos dentro de um trecho (toque = manter aquele pedaço).
     private func marcasCorte(_ t: TrechoEdicao) -> some View {
         let v = max(0.1, t.velocidade)
@@ -852,7 +880,7 @@ struct EditorVideoView: View {
             Text("Vermelho sai. Toque numa marca para manter aquele pedaço (fica tracejada).")
                 .font(.caption2).foregroundStyle(Tema.texto2)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Toggle("Prévia já cortada (o play pula o vermelho)", isOn: $previaCortada)
+            Toggle("Prévia já cortada (toca como vai ficar)", isOn: $previaCortada)
                 .font(.footnote)
             HStack(spacing: 8) {
                 Button("Descartar") { cortes = [] }
@@ -873,6 +901,15 @@ struct EditorVideoView: View {
         let ativos = cortes.filter { !$0.manter }
         guard !ativos.isEmpty else { cortes = []; return }
         registrar()
+        let nova = Self.cortado(trechos, ativos: ativos)
+        removidos = []
+        trechos = nova
+        cortes = []
+        selecionado = nil
+    }
+
+    /// Os trechos com os cortes aplicados (buracos dos cortes fechados; espaços que já existiam ficam).
+    static func cortado(_ trechos: [TrechoEdicao], ativos: [CorteProposto]) -> [TrechoEdicao] {
         var nova: [TrechoEdicao] = []
         var desloc = 0.0
         for t in ProjetoEdicao.posicionados(trechos) {
@@ -903,9 +940,7 @@ struct EditorVideoView: View {
             }
             desloc += t.duracao - fica
         }
-        trechos = nova
-        cortes = []
-        selecionado = nil
+        return nova
     }
 
     // MARK: carregar e prévia
@@ -999,7 +1034,11 @@ struct EditorVideoView: View {
     private func atualizarPrevia() async {
         versaoPrevia += 1
         let minha = versaoPrevia
-        let lista = trechos
+        let ativos = cortes.filter { !$0.manter }
+        let cortar = previaCortada && !ativos.isEmpty
+        let base = ProjetoEdicao.posicionados(trechos)
+        let lista = cortar ? Self.cortado(base, ativos: ativos) : trechos
+        let faixas = cortar ? faixasRemovidas(base) : []
         guard let primeiro = lista.first, fontes.indices.contains(primeiro.fonte) else { return }
         do {
             let tam = (try await MontagemEdicao.tamanhoExibicao(AVURLAsset(url: fontes[primeiro.fonte]))) ?? CGSize(width: 1280, height: 720)
@@ -1012,6 +1051,7 @@ struct EditorVideoView: View {
             item.audioMix = m.audioMix
             item.audioTimePitchAlgorithm = .spectral
             player.replaceCurrentItem(with: item)
+            removidos = faixas
             buscar(min(tempo, total))
             if tocando { player.play() }
         } catch {

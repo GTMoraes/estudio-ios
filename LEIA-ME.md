@@ -263,6 +263,9 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
   trecho num arquivo, só o áudio (M4A) ou sem regravar (um trecho, sem velocidade/volume). O resultado guarda
   a edição: "Editar de novo" reabre com os vídeos guardados em Originais. As fontes entram no trabalho por
   ligação direta ao arquivo (sem ocupar espaço de novo).
+- 0.21.4: prévia dos cortes sem salto: com "Prévia já cortada", a prévia é montada com os cortes ativos já
+  aplicados (`EditorVideoView.cortado`, a mesma conta do "Aplicar cortes") e o cursor converte entre a linha do
+  tempo e o relógio da prévia (`removidos`, `previaDaLinha`, `linhaDaPrevia`). Marcar/desmarcar remonta a prévia.
 - 0.21.3: o app fechava logo ao começar a alinhar (memória: o alinhador float32 na GPU copia 1,2 GB para a
   GPU). Alinhador agora no processador (`.cpuOnly`: pesos mapeados do arquivo); Diagnóstico registra a memória antes
   e depois. Editor: tela não apaga durante o corte automático; se o app sair da frente (GPU proibida em segundo plano),
