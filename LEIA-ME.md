@@ -263,6 +263,9 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
   trecho num arquivo, só o áudio (M4A) ou sem regravar (um trecho, sem velocidade/volume). O resultado guarda
   a edição: "Editar de novo" reabre com os vídeos guardados em Originais. As fontes entram no trabalho por
   ligação direta ao arquivo (sem ocupar espaço de novo).
+- 0.22.2: o envio ao TestFlight foi recusado por 2 motivos, corrigidos: o `onnxruntime.framework` vem sem
+  MinimumOSVersion (o workflow agora preenche no arquivo antes de exportar) e faltavam as 4 orientações para iPad
+  (`UISupportedInterfaceOrientations~ipad`; no iPhone segue só em pé).
 - 0.22.1: pronto para o TestFlight. Workflows novos (pasta PARA-A-PASTA-.github-workflows): `preparar-assinatura.yml`
   (uma vez: cria o certificado Apple Distribution pela API e devolve o p12 para o secret DIST_P12) e
   `testflight.yml` (compila, recria os perfis App Store pela API, assina e envia). `scripts/asc.py` fala com a API do
