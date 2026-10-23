@@ -805,7 +805,7 @@ struct EditorVideoView: View {
     private func proporCortes() {
         guard tarefaCorte == nil else { return }
         guard ModeloCrisper.pronto else {
-            aviso = "Falta o modelo do corte automático. Baixe em Ajustes › Corte automático (1,2 GB)."
+            aviso = "Falta o modelo do corte automático. Baixe em Ajustes › Deixar o app pronto (1,2 GB)."
             return
         }
         player.pause(); tocando = false

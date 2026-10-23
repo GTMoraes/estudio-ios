@@ -192,6 +192,44 @@ final class Nuvem: @unchecked Sendable {
         try await pedir("api/\(site)/cookies", metodo: "DELETE")
     }
 
+    // MARK: - contas do usuário (várias por serviço, uma ativa; só as de quem está logado)
+
+    struct ContaServico: Identifiable, Equatable, Sendable {
+        var id: Int
+        var servico: String          // "instagram" | "reddit"
+        var nome: String             // "@usuario", "u/usuario" ou "Conta 1"
+        var ativa: Bool
+        var atualizada: Date?
+    }
+
+    func contas() async throws -> [ContaServico] {
+        let r = try await objeto("api/contas")
+        return ((r["contas"] as? [[String: Any]]) ?? []).compactMap { c in
+            guard let id = c["id"] as? Int, let s = c["servico"] as? String else { return nil }
+            return ContaServico(id: id, servico: s, nome: c["nome"] as? String ?? "Conta",
+                                ativa: c["ativa"] as? Bool ?? false,
+                                atualizada: (c["updated"] as? Double).map { Date(timeIntervalSince1970: $0) })
+        }
+    }
+
+    /// A sessão daquela conta ainda vale? (nil = o site não respondeu)
+    func validadeConta(_ id: Int) async throws -> Bool? {
+        let r = try await objeto("api/contas/\(id)/status")
+        return r["valid"] as? Bool
+    }
+
+    func adicionarConta(_ servico: String, _ cookies: [[String: Any]]) async throws {
+        try await pedir("api/contas/\(servico)", metodo: "POST", json: ["cookies": cookies])
+    }
+
+    func ativarConta(_ id: Int) async throws {
+        try await pedir("api/contas/\(id)/ativar", metodo: "POST")
+    }
+
+    func removerConta(id: Int) async throws {
+        try await pedir("api/contas/\(id)", metodo: "DELETE")
+    }
+
     func apagarPost(_ id: String) async {
         _ = try? await pedir("api/post/\(id)", metodo: "DELETE")
     }

@@ -11,13 +11,7 @@ struct AjustesView: View {
     @State private var entrando = false
     @State private var erroLogin: String?
 
-    @State private var baixando: Double?
-    @State private var msgModelo: String?
-    @State private var espaco: Int64 = 0
     @AppStorage("vozAcelerador") private var vozAcelerador = "gpu"
-    @State private var baixandoVoz: Double?
-    @State private var msgVoz: String?
-    @State private var espacoVoz: Int64 = 0
     @State private var confirmar: Confirmacao?
 
     var body: some View {
@@ -47,9 +41,12 @@ struct AjustesView: View {
                     modeloLocalCartao
                     vozCartao
                     CartaoCorteAutomatico()
+                    CartaoTesteClonagem()
                     Cartao(titulo: "Sobre", icone: "info.circle") {
                         let v = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
-                        Text("Estúdio \(v)").font(.subheadline)
+                        let b = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+                        // no TestFlight a versão fica fixa entre correções; a build diz qual cada pessoa tem
+                        Text("Estúdio \(v) (build \(b))").font(.subheadline)
                         Text("FFmpeg \(String(cString: estudio_ffmpeg_versao())) · VP9 \(estudio_ffmpeg_decodifica("vp9") == 1 ? "sim" : "não") · AV1 \(estudio_ffmpeg_decodifica("av1") == 1 ? "sim" : "não")")
                             .font(.footnote).foregroundStyle(Tema.texto2)
                         Text("Os resultados ficam no app Arquivos, em “No meu iPhone › Estúdio › Resultados”.")
@@ -62,7 +59,6 @@ struct AjustesView: View {
             .telaEscura()
             .navigationTitle("Ajustes")
             .confirmar($confirmar)
-            .onAppear { espaco = TranscritorLocal.tamanhoEmDisco(); espacoVoz = ModelosVoz.tamanhoEmDisco() + ModelosCoreML.tamanhoEmDisco() }
         }
     }
 
@@ -107,53 +103,17 @@ struct AjustesView: View {
 
     @ViewBuilder private var modeloLocalCartao: some View {
         Cartao(titulo: "Transcrição no iPhone", icone: "iphone") {
+            Text("Qual modelo transcreve quando você não usa a nuvem. Baixar, preparar e apagar ficam em “Deixar o app pronto”, acima.")
+                .font(.footnote).foregroundStyle(Tema.texto2)
             Picker("Modelo", selection: $modeloLocal) {
                 ForEach(TranscritorLocal.modelos) { m in Text("\(m.nome) · \(m.tamanho)").tag(m.id) }
             }
             .pickerStyle(.menu)
             let pronto = TranscritorLocal.pastaDoModelo(modeloLocal) != nil
-            Label(pronto ? "Modelo baixado" : "Modelo ainda não baixado",
+            Label(pronto ? "Este modelo já está no iPhone" : "Este modelo ainda não foi baixado",
                   systemImage: pronto ? "checkmark.circle.fill" : "arrow.down.circle")
+                .font(.footnote)
                 .foregroundStyle(pronto ? .green : Tema.texto2)
-            if let baixando {
-                ProgressView(value: baixando).tint(Tema.acento)
-            }
-            if let msgModelo { Text(msgModelo).font(.footnote).foregroundStyle(Tema.texto2) }
-            if !pronto {
-                BotaoPrincipal(titulo: "Baixar agora", icone: "arrow.down.circle.fill", desativado: baixando != nil) {
-                    baixando = 0; msgModelo = nil
-                    let id = modeloLocal
-                    Task {
-                        do {
-                            _ = try await TranscritorLocal.shared.baixar(id) { p in
-                                Task { @MainActor in if baixando != nil { baixando = p } }
-                            }
-                            msgModelo = "Pronto. A primeira transcrição ainda prepara o modelo no Neural Engine (alguns minutos, uma vez só)."
-                        } catch {
-                            msgModelo = "Falhou: \(error.localizedDescription)"
-                        }
-                        baixando = nil
-                        espaco = TranscritorLocal.tamanhoEmDisco()
-                    }
-                }
-            }
-            HStack {
-                Text("Espaço usado: \(ByteCountFormatter.string(fromByteCount: espaco, countStyle: .file))")
-                    .font(.footnote).foregroundStyle(Tema.texto2)
-                Spacer()
-                if espaco > 0 {
-                    Button("Apagar modelos", role: .destructive) {
-                        confirmar = Confirmacao(titulo: "Apagar os modelos de transcrição?",
-                                                mensagem: "Será preciso baixar e preparar de novo na próxima transcrição.") {
-                            Task {
-                                await TranscritorLocal.shared.apagarModelos()
-                                espaco = TranscritorLocal.tamanhoEmDisco()
-                            }
-                        }
-                    }
-                    .font(.footnote)
-                }
-            }
         }
     }
 
@@ -161,27 +121,8 @@ struct AjustesView: View {
 
     @ViewBuilder private var vozCartao: some View {
         Cartao(titulo: "Tratar voz no iPhone", icone: "waveform") {
-            let pronto = espacoVoz > 0 && ModelosVoz.prontos
-            Label(pronto ? "Modelos de voz baixados" : "Modelos de voz ainda não baixados (290 MB + 290 MB da GPU)",
-                  systemImage: pronto ? "checkmark.circle.fill" : "arrow.down.circle")
-                .foregroundStyle(pronto ? .green : Tema.texto2)
-            if let baixandoVoz { ProgressView(value: baixandoVoz).tint(Tema.acento) }
-            if let msgVoz { Text(msgVoz).font(.footnote).foregroundStyle(Tema.texto2) }
-            if !pronto {
-                BotaoPrincipal(titulo: "Baixar agora", icone: "arrow.down.circle.fill", desativado: baixandoVoz != nil) {
-                    baixandoVoz = 0; msgVoz = nil
-                    Task {
-                        do {
-                            try await ModelosVoz.baixar { p in Task { @MainActor in if baixandoVoz != nil { baixandoVoz = p } } }
-                            msgVoz = "Pronto."
-                        } catch {
-                            msgVoz = "Falhou: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
-                        }
-                        baixandoVoz = nil
-                        espacoVoz = ModelosVoz.tamanhoEmDisco()
-                    }
-                }
-            }
+            Text("Onde os modelos de voz rodam. Baixar, preparar e apagar ficam em “Deixar o app pronto”, acima.")
+                .font(.footnote).foregroundStyle(Tema.texto2)
             Picker("Onde rodar os modelos", selection: Binding(get: { vozAcelerador == "cpu" ? "cpu" : "gpu" },
                                                                 set: { vozAcelerador = $0 })) {
                 Text("GPU (Core ML)").tag("gpu")
@@ -190,7 +131,7 @@ struct AjustesView: View {
             .pickerStyle(.menu)
             Text(vozAcelerador == "cpu"
                  ? "Processador: o caminho mais lento (cerca de 3× a duração do áudio)."
-                 : "GPU: bem mais rápido, com os mesmos cálculos em precisão total. Na 1ª vez baixa mais 290 MB e prepara os modelos. Em cada tratamento o 1º trecho é conferido com o processador; se não bater, volta para o processador sozinho.")
+                 : "GPU: bem mais rápido, com os mesmos cálculos em precisão total. Em cada tratamento o 1º trecho é conferido com o processador; se não bater, volta para o processador sozinho.")
                 .font(.footnote).foregroundStyle(Tema.texto2)
             if let diag = try? String(contentsOf: Diagnostico.arquivo, encoding: .utf8), !diag.isEmpty {
                 DisclosureGroup("Diagnóstico do último tratamento") {
@@ -205,20 +146,6 @@ struct AjustesView: View {
                 }
                 .font(.footnote)
             }
-            if espacoVoz > 0 {
-                HStack {
-                    Text("Espaço usado: \(ByteCountFormatter.string(fromByteCount: espacoVoz, countStyle: .file))")
-                        .font(.footnote).foregroundStyle(Tema.texto2)
-                    Spacer()
-                    Button("Apagar modelos", role: .destructive) {
-                        confirmar = Confirmacao(titulo: "Apagar os modelos de voz?",
-                                                mensagem: "Será preciso baixar e preparar de novo no próximo tratamento de voz.") {
-                            ModelosVoz.apagar(); ModelosCoreML.apagar(); espacoVoz = ModelosVoz.tamanhoEmDisco()
-                        }
-                    }
-                    .font(.footnote)
-                }
-            }
         }
     }
 }
@@ -228,23 +155,28 @@ struct AjustesView: View {
 struct CartaoPreparar: View {
     @Environment(Estudio.self) private var estudio
     @State private var prep = Preparacao.shared
+    @State private var confirmar: Confirmacao?
 
     var body: some View {
         Cartao(titulo: "Deixar o app pronto", icone: "bolt.badge.checkmark") {
-            Text("Baixa e compila agora o que o app usa no iPhone, para o primeiro trabalho começar na hora. Depois de instalar uma versão nova do app (ou atualizar o iOS), as compilações precisam ser refeitas.")
+            Text("Todos os modelos que o app usa no iPhone ficam aqui: baixe e prepare agora para o primeiro trabalho começar na hora, ou apague para liberar espaço. Depois de instalar uma versão nova do app (ou atualizar o iOS), as preparações precisam ser refeitas.")
                 .font(.footnote).foregroundStyle(Tema.texto2)
             ForEach(Preparacao.Parte.allCases) { p in linha(p) }
             BotaoPrincipal(titulo: prep.ocupado ? "Preparando…" : prep.tudoPronto ? "Tudo pronto" : "Preparar tudo",
                            icone: prep.tudoPronto ? "checkmark.circle.fill" : "bolt.fill",
                            desativado: prep.ocupado || prep.tudoPronto || estudio.processandoLocal) {
-                prep.preparar(Preparacao.Parte.allCases, estudio: estudio)
+                prep.preparar(Preparacao.Parte.principais, estudio: estudio)
             }
+            Text("“Preparar tudo” não inclui a clonagem de voz, que ainda é teste. Espaço usado pelos modelos: \(ByteCountFormatter.string(fromByteCount: prep.espacoTotal, countStyle: .file)).")
+                .font(.caption).foregroundStyle(Tema.texto2)
             if estudio.processandoLocal && !prep.tudoPronto {
                 Text("Espere o trabalho atual terminar.").font(.footnote).foregroundStyle(Tema.texto2)
             } else if prep.ocupado {
                 Text("Mantenha o app aberto até terminar. De preferência no Wi-Fi.").font(.footnote).foregroundStyle(.yellow)
             }
         }
+        .confirmar($confirmar)
+        .onAppear { prep.recarregar() }
     }
 
     @ViewBuilder private func linha(_ p: Preparacao.Parte) -> some View {
@@ -264,6 +196,22 @@ struct CartaoPreparar: View {
                         .buttonStyle(.glass)
                         .font(.footnote)
                         .disabled(prep.ocupado || estudio.processandoLocal)
+                }
+            }
+            let espaco = prep.espaco(p)
+            if espaco > 0 && prep.andamento[p] == nil {
+                HStack {
+                    Text(ByteCountFormatter.string(fromByteCount: espaco, countStyle: .file))
+                        .font(.caption).foregroundStyle(Tema.texto2)
+                    Spacer()
+                    Button("Apagar", role: .destructive) {
+                        confirmar = Confirmacao(titulo: "Tem certeza?",
+                                                mensagem: "Apaga \(prep.titulo(p)) do iPhone (\(ByteCountFormatter.string(fromByteCount: espaco, countStyle: .file))). Para usar de novo, será preciso baixar e preparar.") {
+                            Task { await prep.apagar(p) }
+                        }
+                    }
+                    .font(.caption)
+                    .disabled(prep.ocupado || estudio.processandoLocal)
                 }
             }
             if let a = prep.andamento[p] {

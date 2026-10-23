@@ -53,7 +53,9 @@ enum ModeloCrisper {
     /// Baixa o que falta. Arquivo já completo (tamanho certo) é mantido; arquivo pela metade continua
     /// da última parte inteira. progresso(0…1, mensagem).
     /// Serve para o CrisperWhisper e para o alinhador: `origem` no cdn, `pasta` no iPhone.
+    /// `pular`: prefixo de caminho que não precisa vir (ex.: o T3.mlpackage do Chatterbox depois de compilado).
     static func baixar(de origem: URL = ModeloCrisper.base, para pasta: URL = ModeloCrisper.pasta, nome: String = "o modelo",
+                       pular: String? = nil,
                        progresso: @escaping @Sendable (Double, String) -> Void) async throws {
         let base = origem
         let marcaIncompleto = pasta.appendingPathComponent(".incompleto")
@@ -61,7 +63,8 @@ enum ModeloCrisper {
         guard (resp as? HTTPURLResponse)?.statusCode == 200 else {
             throw ErroApp("Não achei a lista do modelo no servidor (manifesto.json).")
         }
-        let m = try JSONDecoder().decode(Manifesto.self, from: dados)
+        var m = try JSONDecoder().decode(Manifesto.self, from: dados)
+        if let pular { m.arquivos.removeAll { $0.caminho.hasPrefix(pular) } }
         let fm = FileManager.default
         try fm.createDirectory(at: pasta, withIntermediateDirectories: true)
         fm.createFile(atPath: marcaIncompleto.path, contents: Data())
@@ -268,7 +271,7 @@ final class ServicoCorte: @unchecked Sendable {
     private func carregado() async throws -> CrisperTranscritor {
         if let t = trava.withLock({ transcritor }) { return t }
         guard ModeloCrisper.pronto else {
-            throw ErroApp("O modelo do corte automático não está no iPhone. Baixe em Ajustes › Corte automático.")
+            throw ErroApp("O modelo do corte automático não está no iPhone. Baixe em Ajustes › Deixar o app pronto.")
         }
         let pasta = ModeloCrisper.pasta
         let carga = Task.detached(priority: .userInitiated) { try CrisperTranscritor(pasta: pasta, onde: .gpu) }

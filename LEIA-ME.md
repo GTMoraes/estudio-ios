@@ -263,8 +263,17 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
   trecho num arquivo, só o áudio (M4A) ou sem regravar (um trecho, sem velocidade/volume). O resultado guarda
   a edição: "Editar de novo" reabre com os vídeos guardados em Originais. As fontes entram no trabalho por
   ligação direta ao arquivo (sem ocupar espaço de novo).
-- Regra de versão (TestFlight): correção pequena mantém o número da versão e só a build sobe (o workflow usa o
-  número da execução); versão nova faz a Apple revisar de novo no teste externo. Por isso a correção abaixo saiu
+- Entrega "0.23.0" (vai como build nova da 0.22.2): contas por usuário na nuvem. Cada usuário tem as próprias contas do Instagram e do Reddit (várias por
+  serviço, uma ativa; tabela `whisper_contas`, cookies em `/data/contas/<id>.txt`); ninguém usa a conta de outro, e
+  sem conta própria o link que pede login falha com o aviso. As contas únicas antigas viram contas do administrador.
+  App: Ajustes › Instagram/Reddit lista as contas (tocar = usar, lixeira = remover, "Adicionar outra conta"); na tela
+  do link aparece a conta que vai ser usada, com troca rápida (`ContasNuvem`, `LinhaContaLink`). Rotas novas
+  `/api/contas…`; as antigas `/api/instagram|reddit/…` continuam, agora para a conta de quem pede.
+  Ajustes: todos os modelos (transcrição, tratar voz, CrisperWhisper, alinhador, Chatterbox) baixam, preparam e
+  apagam em "Deixar o app pronto"; os cartões de cada função ficam só com as configurações. Sobre mostra a build.
+- Regra de versão (TestFlight): a versão fica fixa e só a build sobe (o workflow usa o número da execução), mesmo
+  com função nova; versão nova faz a Apple revisar de novo no teste externo, então só sobe quando for obrigatório.
+  O nome das pastas `_subir` é só o nome da entrega. Por isso a correção abaixo saiu
   como 0.22.2 (build nova), e não 0.22.3.
 - 0.22.3: conversão de vídeo incompatível (VP9 etc.) travava quando o áudio acaba antes do vídeo (ex.: vídeo do
   Instagram com 49 s de imagem e 35 s de som): o gravador esperava áudio para intercalar e o vídeo parava. Agora

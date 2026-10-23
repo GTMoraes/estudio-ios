@@ -87,9 +87,22 @@ struct PainelLink: View {
     @State private var idioma = UserDefaults.standard.string(forKey: "idioma") ?? "pt"
     @State private var padrao = PadraoNome.ler(.link)
 
+    @State private var gatilho = 0
+
     private func usar() { PadraoNome.gravar(padrao, .link) }
 
     var body: some View {
+        VStack(spacing: 16) {
+            if estudio.logado, let site = SiteConta.para(link: link) {
+                // a conta ativa entra na identificação: trocou, identifica de novo com a outra
+                LinhaContaLink(site: site) { info = nil; erro = nil; gatilho += 1 }
+            }
+            conteudo
+        }
+        .task(id: gatilho) { await identificar() }
+    }
+
+    @ViewBuilder private var conteudo: some View {
         Group {
             if let info {
                 Cartao {
@@ -155,7 +168,6 @@ struct PainelLink: View {
                 }
             }
         }
-        .task { await identificar() }
     }
 
     private func identificar() async {
@@ -230,7 +242,7 @@ struct PainelArquivo: View {
                 Text("Tira os “é…”, “hã”, pigarros, palavras cortadas e repetições, com o CrisperWhisper na GPU do iPhone (sem internet). Os cortes caem onde o som já acabou.")
                     .font(.footnote).foregroundStyle(Tema.texto2)
                 if !ModeloCrisper.pronto {
-                    Label("Falta o modelo: baixe em Ajustes › Corte automático (1,2 GB).", systemImage: "arrow.down.circle")
+                    Label("Falta o modelo: baixe em Ajustes › Deixar o app pronto (1,2 GB).", systemImage: "arrow.down.circle")
                         .font(.footnote).foregroundStyle(.orange)
                 } else if temVideo {
                     Text("Abre no editor com os cortes propostos marcados em vermelho. Toque numa marca para manter aquele pedaço e depois em “Aplicar cortes”.")
