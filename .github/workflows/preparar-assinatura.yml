@@ -1,0 +1,34 @@
+name: Preparar assinatura (uma vez)
+
+# Cria o certificado "Apple Distribution" do Estúdio pela API do App Store Connect (sem Mac).
+# Rode UMA vez (aba Actions > "Preparar assinatura (uma vez)" > Run workflow). Antes, crie o secret
+# DIST_P12_SENHA com uma senha inventada por você. No fim, baixe o artefato "assinatura", abra o
+# distribuicao.p12.base64.txt e cole o texto inteiro num secret novo chamado DIST_P12. Depois apague o artefato.
+on:
+  workflow_dispatch:
+
+jobs:
+  certificado:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Ferramentas
+        run: pip install PyJWT cryptography
+      - name: Criar o certificado
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          DIST_P12_SENHA: ${{ secrets.DIST_P12_SENHA }}
+        run: |
+          [ -n "$DIST_P12_SENHA" ] || { echo "::error::crie antes o secret DIST_P12_SENHA"; exit 1; }
+          python scripts/asc.py certificado assinatura "$DIST_P12_SENHA"
+          rm -f assinatura/distribuicao.p12
+      - uses: actions/upload-artifact@v4
+        with:
+          name: assinatura
+          path: assinatura/distribuicao.p12.base64.txt
+          retention-days: 1
