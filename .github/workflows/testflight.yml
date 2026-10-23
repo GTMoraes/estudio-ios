@@ -1,0 +1,146 @@
+name: Enviar ao TestFlight
+
+# Compila, assina para a App Store e envia o Estúdio ao TestFlight.
+# Só roda quando você manda (aba Actions > "Enviar ao TestFlight" > Run workflow).
+# Secrets: ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8, APPLE_TEAM_ID, DIST_P12, DIST_P12_SENHA.
+on:
+  workflow_dispatch:
+
+jobs:
+  testflight:
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      DIST_P12: ${{ secrets.DIST_P12 }}
+      DIST_P12_SENHA: ${{ secrets.DIST_P12_SENHA }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Conferir os secrets
+        run: |
+          for v in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8 APPLE_TEAM_ID DIST_P12 DIST_P12_SENHA; do
+            [ -n "${!v}" ] || { echo "::error::falta o secret $v"; exit 1; }
+          done
+          echo "secrets OK"
+
+      - name: Escolher o Xcode mais novo
+        run: |
+          XC=$(ls -d /Applications/Xcode_*.app | grep -vi beta | sort -V | tail -1)
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Ferramentas da API da Apple
+        run: pip install PyJWT cryptography
+
+      - name: Cache dos codificadores de áudio (MP3/OGG)
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: codificadores-${{ hashFiles('scripts/compilar-codificadores.sh') }}
+      - name: Compilar LAME e Vorbis para iPhone
+        run: bash scripts/compilar-codificadores.sh
+
+      - name: Cache do FFmpeg
+        uses: actions/cache@v4
+        with:
+          path: vendor-ff
+          key: ffmpeg-${{ hashFiles('scripts/compilar-ffmpeg.sh') }}
+      - name: Compilar o FFmpeg para iPhone
+        run: bash scripts/compilar-ffmpeg.sh
+
+      - name: Gerar o projeto (XcodeGen)
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Certificado no chaveiro e chave da API
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          printf '%s\n' "$ASC_KEY_P8" > ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8
+          echo "$DIST_P12" | tr -d ' \r\n' | base64 --decode > "$RUNNER_TEMP/dist.p12"
+          KC="$RUNNER_TEMP/estudio.keychain-db"; KP=$(uuidgen)
+          security create-keychain -p "$KP" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KP" "$KC"
+          curl -fsSL -o "$RUNNER_TEMP/wwdr.cer" https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer
+          security import "$RUNNER_TEMP/wwdr.cer" -k "$KC" -A || true
+          security import "$RUNNER_TEMP/dist.p12" -P "$DIST_P12_SENHA" -A -f pkcs12 -k "$KC"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KP" "$KC" > /dev/null
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$KC"
+          echo "KC=$KC" >> $GITHUB_ENV
+
+      - name: Perfis da App Store (criados na hora pela API)
+        run: |
+          python scripts/asc.py perfis "$RUNNER_TEMP/dist.p12" "$DIST_P12_SENHA" com.gtm.estudio com.gtm.estudio.compartilhar | tee perfis.txt
+          echo "PERFIL_APP=$(grep '^com.gtm.estudio=' perfis.txt | cut -d= -f2-)" >> $GITHUB_ENV
+          echo "PERFIL_EXT=$(grep '^com.gtm.estudio.compartilhar=' perfis.txt | cut -d= -f2-)" >> $GITHUB_ENV
+
+      - name: Arquivar (assinado para a App Store)
+        run: |
+          set -o pipefail
+          xcodebuild -project Estudio.xcodeproj -scheme Estudio -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath build/Estudio.xcarchive -derivedDataPath build \
+            -skipPackagePluginValidation -skipMacroValidation \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="Apple Distribution" \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=YES OTHER_CODE_SIGN_FLAGS="--keychain $KC" \
+            PERFIL_APP="$PERFIL_APP" PERFIL_EXT="$PERFIL_EXT" CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            archive 2>&1 | tee xcodebuild.log | grep -E "error:|ARCHIVE (SUCCEEDED|FAILED)" || true
+          grep -q "ARCHIVE SUCCEEDED" xcodebuild.log
+
+      - name: Exportar o IPA
+        run: |
+          cat > ExportOptions.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>teamID</key><string>${APPLE_TEAM_ID}</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>signingCertificate</key><string>Apple Distribution</string>
+            <key>provisioningProfiles</key><dict>
+              <key>com.gtm.estudio</key><string>${PERFIL_APP}</string>
+              <key>com.gtm.estudio.compartilhar</key><string>${PERFIL_EXT}</string>
+            </dict>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict></plist>
+          PLIST
+          xcodebuild -exportArchive -archivePath build/Estudio.xcarchive -exportPath build/export \
+            -exportOptionsPlist ExportOptions.plist 2>&1 | tee export.log
+          ls -la build/export
+
+      - name: Enviar ao TestFlight
+        run: |
+          IPA=$(ls build/export/*.ipa | head -1)
+          xcrun altool --upload-app -f "$IPA" -t ios --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" 2>&1 | tee envio.log
+          grep -qiE "no errors|UPLOAD SUCCEEDED|successfully uploaded" envio.log
+          echo "### Enviado ao TestFlight: versão $(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' build/Estudio.xcarchive/Products/Applications/Estudio.app/Info.plist) (build ${{ github.run_number }})" >> $GITHUB_STEP_SUMMARY
+          echo "A Apple processa o build em 5 a 30 min; depois ele aparece no App Store Connect > TestFlight." >> $GITHUB_STEP_SUMMARY
+
+      - name: Resumo dos erros (se falhar)
+        if: failure()
+        run: grep -n "error:" xcodebuild.log export.log envio.log 2>/dev/null | head -80 || true
+
+      - name: Apagar o chaveiro
+        if: always()
+        run: |
+          [ -n "$KC" ] && security delete-keychain "$KC" || true
+          rm -f "$RUNNER_TEMP/dist.p12" ~/.appstoreconnect/private_keys/*.p8
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: logs-testflight
+          path: |
+            xcodebuild.log
+            export.log
+            envio.log
+          if-no-files-found: ignore
