@@ -129,6 +129,7 @@ enum ConversorCompat {
         var fimV = false, fimA = false
         var restaAntes = -1
         var parado = Date()
+        var fimAudio = CMTime.zero              // até onde o áudio já foi entregue (real ou silêncio)
 
         while true {
             if sinal.cancelado { escritor.cancelWriting(); throw CancellationError() }
@@ -157,6 +158,28 @@ enum ConversorCompat {
                     throw ErroApp("A gravação parou no fim do vídeo e não terminou.")
                 }
                 Thread.sleep(forTimeInterval: 0.004); continue
+            }
+            // o áudio acabou antes do vídeo (ou some por um trecho): o gravador fica esperando áudio para
+            // intercalar e o vídeo trava. Completa com silêncio até um pouco depois do próximo quadro.
+            if let f = formatoA, entradaA != nil, !fimA, filaA.isEmpty, filaV.count >= limiteV * 3,
+               let ultimo = filaV.last?.1 {
+                // até o último quadro já lido: solta a fila de vídeo inteira de uma vez
+                let alvo = CMTimeAdd(ultimo, CMTime(value: 1, timescale: 10))
+                let antes = filaA.count
+                let escala = CMTimeScale(info.taxaAudio)
+                while CMTimeCompare(fimAudio, alvo) < 0 {
+                    let faltam = Int(((alvo.seconds - fimAudio.seconds) * Double(info.taxaAudio)).rounded(.up))
+                    let n = max(1, min(Int(info.taxaAudio), faltam))
+                    guard let buf = AVAudioPCMBuffer(pcmFormat: f, frameCapacity: AVAudioFrameCount(n)),
+                          let dados = buf.floatChannelData?[0] else { throw ErroApp("Faltou memória para converter o áudio.") }
+                    dados.update(repeating: 0, count: n * Int(f.channelCount))
+                    buf.frameLength = AVAudioFrameCount(n)
+                    let t = CMTime(value: CMTimeValue((fimAudio.seconds * Double(info.taxaAudio)).rounded()), timescale: escala)
+                    guard let s = amostra(buf, em: t, escala: escala) else { throw ErroApp("Não consegui completar o áudio.") }
+                    filaA.append(s)
+                    fimAudio = CMTime(value: t.value + CMTimeValue(n), timescale: escala)
+                }
+                if filaA.count > antes { continue }     // nada novo: segue para a espera abaixo (dorme 4 ms)
             }
             // filas cheias: espera. Exceção: uma fila cheia e a outra vazia quer dizer que o gravador
             // está esperando a outra trilha, então é preciso ler mais para ela chegar.
@@ -201,7 +224,12 @@ enum ConversorCompat {
                 buf.frameLength = AVAudioFrameCount(n)
                 let escala = CMTimeScale(info.taxaAudio)
                 let t = CMTime(value: CMTimeValue((max(0, quadro.tempo) * Double(info.taxaAudio)).rounded()), timescale: escala)
-                if let s = amostra(buf, em: t, escala: escala) { filaA.append(s) }
+                // áudio que cai em cima do silêncio já posto (voltou depois de um buraco): descarta esse bloco
+                if fimA || t.seconds < fimAudio.seconds - 0.002 { continue }
+                if let s = amostra(buf, em: t, escala: escala) {
+                    filaA.append(s)
+                    fimAudio = CMTimeMaximum(fimAudio, CMTime(value: t.value + CMTimeValue(n), timescale: escala))
+                }
             }
         }
 
