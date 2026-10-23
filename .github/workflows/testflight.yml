@@ -95,6 +95,22 @@ jobs:
             archive 2>&1 | tee xcodebuild.log | grep -E "error:|ARCHIVE (SUCCEEDED|FAILED)" || true
           grep -q "ARCHIVE SUCCEEDED" xcodebuild.log
 
+      - name: Corrigir o Info.plist do onnxruntime
+        run: |
+          # o pacote do ONNX Runtime vem sem MinimumOSVersion e a Apple recusa o envio (erros 90530/90360);
+          # a exportação a seguir assina tudo de novo, então mexer aqui não quebra a assinatura final
+          for F in build/Estudio.xcarchive/Products/Applications/Estudio.app/Frameworks/*.framework; do
+            P="$F/Info.plist"
+            [ -f "$P" ] || continue
+            if ! /usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$P" >/dev/null 2>&1; then
+              /usr/libexec/PlistBuddy -c "Add :MinimumOSVersion string 26.0" "$P"
+              echo "MinimumOSVersion acrescentado em $(basename "$F")"
+            elif [ -z "$(/usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$P")" ]; then
+              /usr/libexec/PlistBuddy -c "Set :MinimumOSVersion 26.0" "$P"
+              echo "MinimumOSVersion preenchido em $(basename "$F")"
+            fi
+          done
+
       - name: Exportar o IPA
         run: |
           cat > ExportOptions.plist <<PLIST
