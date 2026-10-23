@@ -263,6 +263,20 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
   trecho num arquivo, só o áudio (M4A) ou sem regravar (um trecho, sem velocidade/volume). O resultado guarda
   a edição: "Editar de novo" reabre com os vídeos guardados em Originais. As fontes entram no trabalho por
   ligação direta ao arquivo (sem ocupar espaço de novo).
+- 0.22.1: pronto para o TestFlight. Workflows novos (pasta PARA-A-PASTA-.github-workflows): `preparar-assinatura.yml`
+  (uma vez: cria o certificado Apple Distribution pela API e devolve o p12 para o secret DIST_P12) e
+  `testflight.yml` (compila, recria os perfis App Store pela API, assina e envia). `scripts/asc.py` fala com a API do
+  App Store Connect (chave do secret ASC_KEY_P8). `project.yml`: perfis por alvo (`PERFIL_APP`/`PERFIL_EXT`, vazios
+  no build do AltStore) e `ITSAppUsesNonExemptEncryption = false`. `App/PrivacyInfo.xcprivacy`: declara UserDefaults
+  e datas de arquivo (a Apple recusa o envio sem isso). O `build-ipa.yml` do AltStore continua igual.
+- 0.22.0: teste de clonagem de voz (Ajustes › "Teste: clonagem de voz"). Chatterbox v3 no iPhone: o T3 (Llama
+  520M) em Core ML com o cache dentro do modelo (estado, float16, `App/Clonagem/MotorChatterbox.swift`), o
+  decodificador da onnx-community no ONNX Runtime pela API C (`App/Clonagem/cb_ort.c`), tokenizador refeito em
+  Swift (`TokenizadorChatterbox.swift`). O modelo vem de `cdn.frx9.com/modelos/chatterbox/` (gerado no GT-PC por
+  `testes/clonagem-voz/rodar-iphone.sh`); o T3 chega como `.mlpackage` e o iPhone compila na 1ª vez. A voz
+  (`voz-*.json`, também do rodar-iphone.sh) é importada no próprio teste e fica em "Estúdio › Chatterbox-vozes".
+  "Conferir o modelo" compara o tokenizador e os primeiros tokens com o PyTorch. Resultados em
+  "Estúdio › Clonagem-testes". `ModeloCrisper.baixar` ganhou `pular:` (não baixa de novo o pacote já compilado).
 - 0.21.6: fila de trabalhos corrigida. (1) Sair do app só marca "Pausado" no que está rodando; quem espera a vez
   continua "Na fila" e, ao voltar, reescreve a posição (`repintarFila`). (2) Falha por sair do app só conta se foi
   DEPOIS de o trabalho pegar a vez (`geracaoDaVez`), não conta como tentativa (antes: 3 e erro). (3) Pedidos que

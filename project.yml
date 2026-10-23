@@ -17,7 +17,7 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     TARGETED_DEVICE_FAMILY: "1"
-    MARKETING_VERSION: "0.21.6"
+    MARKETING_VERSION: "0.22.1"
     CURRENT_PROJECT_VERSION: "1"
     CODE_SIGNING_ALLOWED: "NO"
     CODE_SIGNING_REQUIRED: "NO"
@@ -48,6 +48,7 @@ targets:
         CFBundleDisplayName: Estúdio
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        ITSAppUsesNonExemptEncryption: false   # só HTTPS do sistema: isento (a Apple não pergunta a cada build)
         LSRequiresIPhoneOS: true
         UILaunchScreen:
           UIColorName: Fundo
@@ -87,6 +88,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gtm.estudio
+        # TestFlight: o workflow testflight.yml passa PERFIL_APP; no build do AltStore fica vazio
+        PROVISIONING_PROFILE_SPECIFIER: $(PERFIL_APP)
         SWIFT_OBJC_BRIDGING_HEADER: App/Codificadores/Estudio-Bridging-Header.h
         HEADER_SEARCH_PATHS: "$(PROJECT_DIR)/vendor/include $(PROJECT_DIR)/vendor-ff/include $(PROJECT_DIR)/App/MotorVoz"
         LIBRARY_SEARCH_PATHS: "$(PROJECT_DIR)/vendor/lib $(PROJECT_DIR)/vendor-ff/lib"
@@ -111,6 +114,7 @@ targets:
         CFBundleDisplayName: Estúdio
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        ITSAppUsesNonExemptEncryption: false
         NSExtension:
           NSExtensionPointIdentifier: com.apple.share-services
           NSExtensionPrincipalClass: ShareViewController
@@ -125,3 +129,4 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gtm.estudio.compartilhar
+        PROVISIONING_PROFILE_SPECIFIER: $(PERFIL_EXT)
