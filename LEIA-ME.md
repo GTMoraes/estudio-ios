@@ -263,6 +263,9 @@ nova do app ou atualizar o iOS (a chave é a pasta do app + a versão do iOS).
   trecho num arquivo, só o áudio (M4A) ou sem regravar (um trecho, sem velocidade/volume). O resultado guarda
   a edição: "Editar de novo" reabre com os vídeos guardados em Originais. As fontes entram no trabalho por
   ligação direta ao arquivo (sem ocupar espaço de novo).
+- Regra de versão (TestFlight): correção pequena mantém o número da versão e só a build sobe (o workflow usa o
+  número da execução); versão nova faz a Apple revisar de novo no teste externo. Por isso a correção abaixo saiu
+  como 0.22.2 (build nova), e não 0.22.3.
 - 0.22.3: conversão de vídeo incompatível (VP9 etc.) travava quando o áudio acaba antes do vídeo (ex.: vídeo do
   Instagram com 49 s de imagem e 35 s de som): o gravador esperava áudio para intercalar e o vídeo parava. Agora
   `ConversorCompat` completa com silêncio quando o vídeo fica preso esperando áudio; áudio que volte depois de um
